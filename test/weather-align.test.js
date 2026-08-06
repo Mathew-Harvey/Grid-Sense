@@ -204,6 +204,22 @@ test('PCHIP is a cubic, not linear interpolation in disguise', () => {
   assert.ok(maxGap > 5, `indistinguishable from linear (max gap ${maxGap})`);
 });
 
+test('PCHIP refuses input it would silently misread', () => {
+  const t = hourly([0, 1, 2, 3]);
+
+  // A short value array reads past its end as undefined, and the NaN that makes
+  // spreads through the cubic into every neighbouring interval.
+  assert.throws(() => interpolateToGrid(t, [0, 10, 20], [T0 + 1]), /3 values/);
+
+  // Descending or duplicate stamps make the bracket search and the secants
+  // meaningless, and the answer that comes back is plausible rather than wrong
+  // looking: reversed hourly weather returns a flat line at its first sample.
+  assert.throws(() => interpolateToGrid([...t].reverse(), [0, 10, 20, 30], [T0 + 1]),
+    /strictly increase/);
+  assert.throws(() => interpolateToGrid([T0, T0 + HOUR_MS, T0 + HOUR_MS], [0, 10, 20], [T0 + 1]),
+    /strictly increase/);
+});
+
 // --- 3. Solar position -------------------------------------------------------
 
 const SYDNEY = { lat: -33.8688, lon: 151.2093 };
@@ -302,6 +318,21 @@ test('clear-sky index separates cloud from geometry', () => {
   const csDawn = clearSkyGhi(SYDNEY.lat, SYDNEY.lon, dawn);
   assert.ok(csDawn > 20 && csDawn < 400);
   assert.ok(clearSkyIndex(0.95 * csDawn, csDawn) > 0.9);
+
+  // Twilight is the dangerous case, not midnight. Midnight gives a reference of
+  // exactly zero, which any guard catches; a few minutes either side of sunrise
+  // gives a reference of a few W/m^2, and a sensor sitting on a small offset
+  // then divides its way to a clear-sky index of 1.2 in the dark. A guard that
+  // only tests for zero passes every check above and still does this.
+  const twilight = [];
+  for (let m = -180; m <= 0; m++) {
+    const cs = clearSkyGhi(SYDNEY.lat, SYDNEY.lon, dawn + m * 60_000);
+    if (cs > 0 && cs < 20) twilight.push(cs);
+  }
+  assert.ok(twilight.length > 0, 'no sub-floor twilight instants found to test');
+  for (const cs of twilight) {
+    assert.equal(clearSkyIndex(4, cs), 0, `sensor offset survived a reference of ${cs} W/m^2`);
+  }
 });
 
 // --- 5. Batching -------------------------------------------------------------
@@ -425,6 +456,15 @@ test('the quota cost of a backfill is not one call', () => {
   );
   // Small requests still cost exactly one.
   assert.equal(estimateCallCost({ locations: 1, variables: 5, days: 3 }), 1);
+
+  // The two factors are independent and they multiply. Counting days alone
+  // still lands inside the range checked above, so it has to be pinned
+  // separately or the variable factor is untested.
+  assert.equal(estimateCallCost({ locations: 1, variables: 20, days: 3 }), 2);
+  assert.equal(estimateCallCost({ locations: 1, variables: 10, days: 28 }), 2);
+  assert.equal(estimateCallCost({ locations: 1, variables: 20, days: 28 }), 4);
+  // Which is what makes the 12-variable 90-day figure 7.71 and not 6.43.
+  assert.ok(Math.abs(perLocation - (12 / 10) * (90 / 14)) < 1e-9);
 });
 
 // --- Derived features --------------------------------------------------------
@@ -486,6 +526,65 @@ test('feature vectors carry names and only weather that matters', () => {
   // poisons a learned expert's state permanently.
   const empty = buildFeatureVector('wind', {}, SYDNEY.lat, SYDNEY.lon, t);
   for (const v of empty.values) assert.ok(Number.isFinite(v));
+
+  // The provider reports surface pressure in hPa and the density formula wants
+  // Pa. Skipped, the density lands at 0.012 kg/m^3 — still finite, still small,
+  // so every assertion above passes while every wind farm loses a factor of a
+  // hundred into a fitted coefficient.
+  const density = wind.values[wind.names.indexOf('air_density')];
+  assert.ok(density > 0.85 && density < 1.15, `air density feature ${density}`);
+
+  // A fueltech outside the vocabulary must not quietly collect the thermal
+  // features. The registry carries a null fueltech for unclassified stations.
+  assert.throws(() => buildFeatureVector(null, weather, SYDNEY.lat, SYDNEY.lon, t),
+    /No feature vector defined/);
+  assert.throws(() => buildFeatureVector('solar_rooftop', weather, SYDNEY.lat, SYDNEY.lon, t),
+    /No feature vector defined/);
+  assert.throws(() => buildFeatureVector('toString', weather, SYDNEY.lat, SYDNEY.lon, t),
+    /No feature vector defined/);
+});
+
+test('features stay in one scale through a gale and through the night', () => {
+  // The fixture above runs at 12 m/s, which proves nothing about scale: power
+  // goes as the cube, so the feature grows eightfold for every doubling and the
+  // interesting end of the range is the one no other test visits. 25 m/s is the
+  // cut-out speed, above which a turbine produces nothing and there is no
+  // output left to predict, so that is where the scale has to still hold.
+  const t = Date.UTC(2026, 11, 21, 2, 0, 0);
+  for (const v100 of [0, 5, 12, 20, 25]) {
+    const { names, values } = buildFeatureVector('wind', {
+      wind_speed_100m: v100, wind_speed_10m: v100 * 0.75,
+      wind_direction_100m: 270, surface_pressure: 1008, temperature_2m: 20,
+    }, SYDNEY.lat, SYDNEY.lon, t);
+    for (let i = 0; i < values.length; i++) {
+      assert.ok(Number.isFinite(values[i]), `${names[i]} is ${values[i]} at ${v100} m/s`);
+      assert.ok(Math.abs(values[i]) < 10,
+        `${names[i]} reached ${values[i].toFixed(1)} at ${v100} m/s, off the scale of the rest`);
+    }
+  }
+
+  // Still cubic where it matters: eight times the power for double the wind.
+  const at = (v) => buildFeatureVector('wind', { wind_speed_100m: v, wind_speed_10m: v * 0.75,
+    wind_direction_100m: 270, surface_pressure: 1008, temperature_2m: 20 },
+  SYDNEY.lat, SYDNEY.lon, t).values[0];
+  assert.ok(Math.abs(at(16) / at(8) - 8) < 1e-9);
+
+  // Night, with a sensor reading a small offset rather than a clean zero. Both
+  // the clear-sky index and the diffuse fraction divide by something that has
+  // gone to zero, and either one arriving as NaN or Infinity would be carried
+  // into an expert's state and never leave it.
+  const midnight = Date.UTC(2026, 11, 21, 15, 0, 0);
+  for (const ghi of [0, 2]) {
+    const { names, values } = buildFeatureVector('solar_utility', {
+      shortwave_radiation: ghi, diffuse_radiation: ghi, direct_normal_irradiance: 0,
+      cloud_cover_low: 0, cloud_cover_mid: 0, cloud_cover_high: 0, temperature_2m: 14,
+    }, SYDNEY.lat, SYDNEY.lon, midnight);
+    for (let i = 0; i < values.length; i++) {
+      assert.ok(Number.isFinite(values[i]), `${names[i]} is ${values[i]} at night with GHI ${ghi}`);
+    }
+    assert.equal(values[names.indexOf('clear_sky_index')], 0);
+    assert.equal(values[names.indexOf('diffuse_fraction')], 0);
+  }
 });
 
 test('the fueltech vocabulary is covered exactly', () => {

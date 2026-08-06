@@ -391,6 +391,64 @@ test('hourly weather is interpolated onto the five-minute grid, not held flat', 
   assert.equal(bundle.target, 'output_mw');
 });
 
+test('a variable survives a null in the first weather record', () => {
+  // Providers return nulls at the edges of a backfill window. Deciding which
+  // variables exist from record zero alone drops the whole series for that
+  // variable, and nothing downstream reports a variable that was never there —
+  // for solar that is clear_sky_index, the one it is judged on.
+  const { observations, weather } = syntheticWindFarm(777, {});
+  const complete = correlateStation(observations, weather, 'wind');
+  assert.ok(complete.variables.temperature_2m, 'baseline must have the variable');
+
+  weather[0] = { ...weather[0], temperature_2m: null };
+  const withNull = correlateStation(observations, weather, 'wind');
+  assert.ok(withNull.variables.temperature_2m,
+    'one null reading must not delete the variable from the station');
+
+  // And a key genuinely absent from the first record but present later.
+  const { observations: o2, weather: w2 } = syntheticWindFarm(778, {});
+  delete w2[0].temperature_2m;
+  assert.ok(correlateStation(o2, w2, 'wind').variables.temperature_2m);
+});
+
+test('a station with no usable capacity gets no curve rather than an infinite one', () => {
+  // Every parameter is a fraction of nameplate. A zero capacity used to divide
+  // through and return gain = Infinity under converged: true, which reads as a
+  // successful fit to anything that checks the flag.
+  const { observations, weather } = syntheticWindFarm(4242, {});
+  const speeds = weather.map((w) => w.wind_speed_100m);
+  const outputs = observations.map((o) => o.output_mw);
+
+  for (const cap of [0, -5, null, NaN]) {
+    const wind = fitWindCurve(speeds, outputs, cap);
+    assert.equal(wind.converged, false, `wind capacity ${cap}`);
+    assert.equal(wind.predict, null);
+
+    const solar = fitSolarCurve(
+      new Array(400).fill(0.8), new Array(400).fill(800),
+      new Array(400).fill(25), new Array(400).fill(50), cap,
+    );
+    assert.equal(solar.converged, false, `solar capacity ${cap}`);
+    assert.equal(solar.gain, null);
+    assert.equal(solar.predict, null);
+  }
+});
+
+test('a target masked down to nothing reads as constant, not as zero relationship', () => {
+  // Removing curtailed intervals correctly can leave a station with no
+  // admissible data at all. "No relationship" and "nothing to measure" must not
+  // present the same way on a chart.
+  const { observations, weather } = syntheticWindFarm(2468, {});
+  const blank = observations.map((o) => ({ ...o, output_mw: null, uigf_mw: null }));
+
+  const bundle = correlateStation(blank, weather, 'hydro');
+  assert.equal(bundle.n_used, blank.length, 'the intervals themselves are usable');
+  assert.equal(bundle.target_constant, true);
+
+  // The ordinary varying case must still read false.
+  assert.equal(correlateStation(observations, weather, 'wind').target_constant, false);
+});
+
 test('a lag is reported only when the profile actually has a peak', () => {
   // Structure the driver so that shifting it genuinely degrades the match. That
   // is the condition under which a peak lag means anything physical.

@@ -62,6 +62,7 @@ function heteroscedasticRun(targetCoverage, seed) {
   const rand = mulberry32(seed);
   const intervals = [];
   const actuals = [];
+  const scales = [];
 
   for (let t = 0; t < 5000; t++) {
     const pointForecast = 500;
@@ -74,11 +75,17 @@ function heteroscedasticRun(targetCoverage, seed) {
 
     intervals.push(model.interval(pointForecast));
     actuals.push(actual);
+    scales.push(scale);
     model.update(pointForecast, actual);
   }
 
-  return { model, intervals, actuals };
+  return { model, intervals, actuals, scales };
 }
+
+// The first band is the cold-start one, capacity wide by design. Anything that
+// compares band widths has to start past it or it is only ever measuring the
+// clip, and would read the same against a model that never adapted at all.
+const WARM = 100;
 
 test('conformal coverage holds at 90% through a tenfold swing in error scale', () => {
   const { model, intervals, actuals } = heteroscedasticRun(0.9, 12345);
@@ -103,11 +110,71 @@ test('conformal coverage holds at 80% through a tenfold swing in error scale', (
 });
 
 test('a fixed-width band sized on the same history cannot hold coverage per phase', () => {
-  // Sanity check on the premise: with the scale swinging, conditional coverage
-  // in the quiet phase and the wild phase pull apart hard unless the band moves.
-  const { intervals } = heteroscedasticRun(0.9, 12345);
-  const widths = intervals.map((iv) => iv.hi - iv.lo);
-  assert.ok(Math.max(...widths) > 3 * Math.min(...widths.slice(100)));
+  // The premise of the whole class, stated as the thing it actually claims:
+  // conditional coverage in the quiet phase and the wild phase pull apart unless
+  // the band moves. Comparing band widths would not show this — the widths move
+  // for a model with alpha frozen too, because the error window alone tracks the
+  // scale. Only per-phase coverage separates the two.
+  const { intervals, actuals, scales } = heteroscedasticRun(0.9, 12345);
+
+  const widths = intervals.slice(WARM).map((iv) => iv.hi - iv.lo).sort((a, b) => a - b);
+  const fixedHalfWidth = widths[widths.length >> 1] / 2;
+
+  const phaseCoverage = (wild, inside) => {
+    let n = 0;
+    let hit = 0;
+    for (let t = WARM; t < scales.length; t++) {
+      if ((scales[t] > 11) !== wild) continue;
+      n++;
+      if (inside(t)) hit++;
+    }
+    return hit / n;
+  };
+
+  const adaptiveIn = (t) => actuals[t] >= intervals[t].lo && actuals[t] <= intervals[t].hi;
+  const fixedIn = (t) => Math.abs(actuals[t] - 500) <= fixedHalfWidth;
+
+  const adaptiveGap = Math.abs(phaseCoverage(false, adaptiveIn) - phaseCoverage(true, adaptiveIn));
+  const fixedGap = Math.abs(phaseCoverage(false, fixedIn) - phaseCoverage(true, fixedIn));
+
+  assert.ok(fixedGap > 0.08, `fixed band phase gap only ${fixedGap.toFixed(4)}`);
+  assert.ok(adaptiveGap < 0.05, `adaptive band phase gap ${adaptiveGap.toFixed(4)}`);
+  assert.ok(fixedGap > 3 * adaptiveGap, `fixed ${fixedGap.toFixed(4)} vs adaptive ${adaptiveGap.toFixed(4)}`);
+});
+
+test('the reported quantiles are a distribution centred on the point forecast', () => {
+  const { model } = heteroscedasticRun(0.9, 12345);
+  const pointForecast = 500;
+
+  // A displaced median is invisible in a coverage check and poisons every CRPS
+  // taken from these quantiles, so it is asserted exactly rather than loosely.
+  assert.equal(model.quantiles(pointForecast, [0.5])[0].v, pointForecast);
+
+  const levels = [0.01, 0.05, 0.1, 0.25, 0.4, 0.5, 0.6, 0.75, 0.9, 0.95, 0.99];
+  const qs = model.quantiles(pointForecast, levels);
+  for (let i = 1; i < qs.length; i++) {
+    assert.ok(qs[i].v >= qs[i - 1].v, `quantiles cross between ${qs[i - 1].q} and ${qs[i].q}`);
+  }
+
+  // The pair bracketing the target has to be the band the user was shown, or the
+  // fan chart and the score are describing two different forecasts.
+  const iv = model.interval(pointForecast);
+  const pair = model.quantiles(pointForecast, [0.05, 0.95]);
+  assert.ok(Math.abs(pair[0].v - iv.lo) < 1e-12);
+  assert.ok(Math.abs(pair[1].v - iv.hi) < 1e-12);
+});
+
+test('a station with no registered capacity is refused, not silently unbounded', () => {
+  // Most of the registry carries capacity_mw: null. clamp(x, 0, null) returns
+  // null without complaint, so an unchecked capacity produces null bounds and a
+  // band that covers nothing.
+  assert.throws(() => new AdaptiveConformal({ capacityMw: null }), TypeError);
+  assert.throws(() => new AdaptiveConformal({}), TypeError);
+  assert.throws(() => new AdaptiveConformal({ capacityMw: 0 }), TypeError);
+  assert.throws(() => new AdaptiveConformal({ capacityMw: 100, targetCoverage: 1 }), RangeError);
+  assert.throws(() => new AdaptiveConformal({ capacityMw: 100, window: 0 }), RangeError);
+  assert.throws(() => pctOfCapacity(5, 0), TypeError);
+  assert.throws(() => pctOfCapacity(5, null), TypeError);
 });
 
 // --- 2. Capacity clip -------------------------------------------------------
@@ -251,12 +318,29 @@ test('PIT rejects uniformity for an underconfident forecast', () => {
   assert.ok(h.counts[4] + h.counts[5] > 2 * (h.counts[0] + h.counts[9]));
 });
 
-test('pitValue interpolates within the band and pins outside it', () => {
+test('pitValue interpolates within the band and lands mid-tail outside it', () => {
   const q = [{ q: 0.1, v: 10 }, { q: 0.5, v: 20 }, { q: 0.9, v: 30 }];
   assert.equal(pitValue(q, 20), 0.5);
   assert.ok(Math.abs(pitValue(q, 15) - 0.3) < 1e-12);
-  assert.equal(pitValue(q, 5), 0.1);
-  assert.equal(pitValue(q, 99), 0.9);
+  // Below the 0.1 knot the outcome is somewhere in [0, 0.1) and nothing narrows
+  // it further; the knot's own level 0.1 is the one value it definitely is not.
+  assert.equal(pitValue(q, 5), 0.05);
+  assert.equal(pitValue(q, 99), 0.95);
+});
+
+test('PIT stays flat when a calibrated forecast is issued on a coarse decile grid', () => {
+  // The grid a fan chart actually uses. Pinning tail outcomes to the outermost
+  // knot empties the first histogram bin and doubles the second, which rejects a
+  // perfect forecast outright — the failure mode this guards is not subtle.
+  const deciles = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9];
+  const rand = mulberry32(2024);
+  const values = [];
+  for (let t = 0; t < 5000; t++) {
+    values.push(pitValue(normalQuantiles(0, 1, deciles), invNormal(rand())));
+  }
+  const h = pitHistogram(values);
+  assert.ok(Math.min(...h.counts) > 0, `empty bin: ${h.counts.join(' ')}`);
+  assert.ok(h.pValue > 0.05, `p=${h.pValue.toExponential(2)} rejected a calibrated decile forecast`);
 });
 
 test('the chi-squared p-value matches published critical values', () => {
@@ -301,12 +385,44 @@ test('RollingScore means only the last window values', () => {
 });
 
 test('RollingScore stays exact over many laps of the ring', () => {
+  // Deliberately not a whole number of laps. Stopping on a lap boundary lands
+  // on the once-per-lap recompute, so the running sum — the thing that runs on
+  // 99 pushes in 100 and the thing that can drift — is never read at all.
+  const pushes = 200037;
   const r = new RollingScore(100);
-  for (let i = 0; i < 200000; i++) r.push(i % 7);
-  // The last 100 pushes of a period-7 cycle: recompute the truth directly.
+  for (let i = 0; i < pushes; i++) r.push(i % 7);
+  assert.notEqual(r.head, 0, 'test must stop mid-lap to exercise the running sum');
+
   let expected = 0;
-  for (let i = 200000 - 100; i < 200000; i++) expected += i % 7;
+  for (let i = pushes - 100; i < pushes; i++) expected += i % 7;
   assert.ok(Math.abs(r.mean() - expected / 100) < 1e-12);
+
+  // Values that do not sum exactly in binary, so the running path has something
+  // to lose if the periodic re-add is not doing its job.
+  const f = new RollingScore(64);
+  for (let i = 0; i < 500000; i++) f.push(0.1 * (i % 13) + 1e7);
+  let want = 0;
+  for (let i = 500000 - 64; i < 500000; i++) want += 0.1 * (i % 13) + 1e7;
+  assert.ok(Math.abs(f.mean() - want / 64) < 1e-6, `drifted to ${f.mean()}`);
+});
+
+test('paired scores refuse a ragged pair rather than scoring the overlap', () => {
+  // A longer actuals array is the dangerous one: no NaN, no throw, just a
+  // plausible number computed from part of the data.
+  assert.throws(() => mae([1, 2, 3], [1, 2]), RangeError);
+  assert.throws(() => rmse([1, 2], [1, 2, 3]), RangeError);
+  assert.throws(() => coverage([{ lo: 0, hi: 1 }], [0.5, 0.5]), RangeError);
+  assert.throws(() => mae([], []), RangeError);
+  assert.throws(() => pitHistogram([]), RangeError);
+});
+
+test('pitHistogram bins every value it is given', () => {
+  // An out-of-range value used to land on counts[-1], vanishing from the
+  // histogram while still counting towards the expected frequency.
+  const h = pitHistogram([-0.2, 0.05, 0.5, 1.4, 0.95]);
+  assert.equal(h.counts.reduce((a, b) => a + b, 0), 5);
+  assert.equal(h.counts[0], 2);
+  assert.equal(h.counts[9], 2);
 });
 
 // --- MAE / RMSE -------------------------------------------------------------

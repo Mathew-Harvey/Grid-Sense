@@ -27,6 +27,24 @@ function clamp(x, lo, hi) {
   return x < lo ? lo : (x > hi ? hi : x);
 }
 
+/**
+ * Map a nominal two-sided coverage onto the level the adaptive loop currently
+ * wants the band sized at.
+ *
+ * Two fixed points, and both matter. At the target the warp returns 1 - alpha,
+ * so the quantile pair bracketing the target band reproduces interval() exactly
+ * rather than drifting away from the band the user is actually shown. At zero
+ * it returns zero, which keeps the median of the reported distribution on the
+ * point forecast; adding the correction as a flat offset instead puts the whole
+ * of it on the upper side at level 0.5, so the "median" comes back above the
+ * forecast and every CRPS taken from those quantiles carries that bias.
+ */
+function warpCoverage(nominal, target, adapted) {
+  return nominal <= target
+    ? adapted * nominal / target
+    : adapted + (1 - adapted) * (nominal - target) / (1 - target);
+}
+
 export class AdaptiveConformal {
   /**
    * @param {object} opts
@@ -36,6 +54,24 @@ export class AdaptiveConformal {
    * @param {number} opts.capacityMw registered capacity, the hard physical ceiling on output
    */
   constructor({ targetCoverage = 0.9, gamma = 0.005, window = 2000, capacityMw }) {
+    // Registered capacity is missing on a large share of the station registry —
+    // aggregated loads, unbuilt farms, anything AEMO registers without a plant
+    // behind it. Left unchecked those flow straight into the clip, where
+    // `x > null` coerces to `x > 0` and every bound comes back as literal null:
+    // no throw, no NaN, just a band that silently covers nothing. A station
+    // without a capacity has no business having intervals issued for it, so say
+    // so here rather than three layers down in a chart that draws blank.
+    if (!Number.isFinite(capacityMw) || capacityMw <= 0) {
+      throw new TypeError(`AdaptiveConformal needs a positive capacityMw, got ${capacityMw}`);
+    }
+    // The level warp divides by the target and by its complement.
+    if (!(targetCoverage > 0 && targetCoverage < 1)) {
+      throw new RangeError(`targetCoverage must be in (0,1), got ${targetCoverage}`);
+    }
+    if (!Number.isInteger(window) || window < 1) {
+      throw new RangeError(`window must be a positive integer, got ${window}`);
+    }
+
     this.targetCoverage = targetCoverage;
     this.gamma = gamma;
     this.capacityMw = capacityMw;
@@ -73,6 +109,12 @@ export class AdaptiveConformal {
   /**
    * Record the outcome for a point forecast whose interval has already been
    * issued, and adapt.
+   *
+   * Curtailed intervals must not be passed here. When a semi-scheduled plant is
+   * capped, the gap between forecast and output is a dispatch instruction, not a
+   * forecast error; feeding it in inflates the band for the whole length of the
+   * window — about seven days at five-minute resolution — and drags alpha with
+   * it. The caller holds the mask, so the caller has to do the skipping.
    *
    * @param {number} pointForecast MW
    * @param {number} actual MW
@@ -113,13 +155,10 @@ export class AdaptiveConformal {
    * @returns {{q: number, v: number}[]}
    */
   quantiles(pointForecast, levels) {
-    // Apply the adaptive correction at every level, not just at target, so the
-    // pair of quantiles bracketing the target band reproduce interval() exactly
-    // instead of drifting away from the band actually shown to the user.
-    const shift = (1 - this.alpha) - this.targetCoverage;
+    const adapted = 1 - this.alpha;
 
     return levels.map((q) => {
-      const twoSided = clamp(Math.abs(2 * q - 1) + shift, 0, 1);
+      const twoSided = warpCoverage(Math.abs(2 * q - 1), this.targetCoverage, adapted);
       const halfWidth = this.errorQuantile(twoSided);
       const v = q >= 0.5 ? pointForecast + halfWidth : pointForecast - halfWidth;
       return { q, v: clamp(v, 0, this.capacityMw) };
@@ -147,6 +186,12 @@ export class AdaptiveConformal {
     // a zero-width band would spend the first updates guaranteed to miss and
     // drag alpha to its floor before any real error had been seen.
     if (this.n === 0) return this.capacityMw;
+
+    // An absolute error cannot be negative, so the distribution's zeroth
+    // quantile is zero — not the smallest error that happened to be sampled.
+    // Taking the sample minimum here would leave a band of asked-for zero width
+    // stubbornly open by however lucky the best interval in the window was.
+    if (level <= 0) return 0;
 
     if (this.stale) {
       this.sorted.set(this.errors);

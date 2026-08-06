@@ -335,6 +335,17 @@ export function clearSkyGhi(lat, lon, epochMs) {
 // amplified by division.
 const CLEAR_SKY_FLOOR = 20;
 
+// Wind power density is divided by a round 1000 W/m^2, which puts its standard
+// deviation over the backfill at 0.37 — the same order as wind speed at 0.20
+// and direction at 0.71, which is what the shared regulariser needs. The cube
+// makes the tail long rather than the centre wrong: the feature reaches about 9
+// at the 25 m/s cut-out, and above cut-out a turbine produces nothing, so the
+// range where it grows without bound is a range where there is no output to
+// predict. Scaling by the cut-out density instead was measured and is worse —
+// it drops the standard deviation to 0.04 and makes the single most important
+// wind feature nearly invisible to a distance metric.
+const WIND_POWER_SCALE = 1000;
+
 /**
  * Clear-sky index: measured irradiance as a fraction of the clear-sky
  * reference.
@@ -378,6 +389,19 @@ function finite(v, fallback = 0) {
 export function buildFeatureVector(fueltech, weatherAtTime, lat, lon, t) {
   const w = weatherAtTime;
 
+  // A fueltech outside the vocabulary throws instead of falling through to the
+  // thermal branch. The registry carries a null fueltech for every station it
+  // could not classify, and handing one of those a temperature and a humidity
+  // reads as a modelled station with a weak fit rather than as a station that
+  // was never classified. A typo in a known name fails the same silent way.
+  // Own properties only: `in` would accept 'constructor' and 'toString'.
+  if (!Object.hasOwn(VARIABLES_BY_FUELTECH, fueltech)) {
+    throw new Error(
+      `No feature vector defined for fueltech ${JSON.stringify(fueltech)}. ` +
+      `Add it to VARIABLES_BY_FUELTECH and give it a branch here.`
+    );
+  }
+
   if (fueltech === 'solar_utility') {
     const zenith = solarZenith(lat, lon, t);
     const cosZ = Math.max(0, Math.cos(zenith * DEG));
@@ -418,7 +442,7 @@ export function buildFeatureVector(fueltech, weatherAtTime, lat, lon, t) {
       'wind_dir_sin', 'wind_dir_cos', 'air_density',
     ];
     const values = Float64Array.of(
-      windPower(rho, v100) / 1000,
+      windPower(rho, v100) / WIND_POWER_SCALE,
       v100 / 15,
       windShear(v100, v10),
       // Direction has to go in as a sine and cosine pair. Fed as degrees, 359
@@ -434,7 +458,7 @@ export function buildFeatureVector(fueltech, weatherAtTime, lat, lon, t) {
 
   // Storage and pumps follow price, not weather. An empty vector says so
   // honestly; a populated one would let the fit chase coincidences.
-  if (VARIABLES_BY_FUELTECH[fueltech]?.length === 0) {
+  if (VARIABLES_BY_FUELTECH[fueltech].length === 0) {
     return { names: [], values: new Float64Array(0) };
   }
 

@@ -12,6 +12,20 @@
 //     forecast,       // forecast[h-1] is the outlook for t+h
 //     horizon_steps } // see below
 //
+// `tod_minutes` and `month` are NEM local, and NEM local is UTC+10 the whole
+// year in every region — no daylight saving, ever. Derive them with
+// nemDayParts() rather than from a Date's local accessors, which would shift
+// every diurnal bucket by an hour for half the year on any machine set to
+// Australian civil time and produce a climatology smeared across two buckets.
+//
+// `forecast[h-1]` must be a forecast for t+h *issued at or before t*. The
+// weather harvester currently only holds observed archives, so the convenient
+// thing to do in a replay — reading the archive at t+h and calling it the
+// outlook — hands every weather-driven expert here the answer. The bank would
+// then post a skill figure no operational system can reproduce, and nothing in
+// this file can detect it. Persist the forecast that was actually issued, or
+// degrade the archive to something a forecast could plausibly have said.
+//
 // update() pairs a state with whatever eventuated `state.horizon_steps`
 // intervals after it, defaulting to one. Run a separate bank per horizon: the
 // learned experts fit whichever horizon they are fed, and mixing horizons into
@@ -29,6 +43,21 @@
 //   clear_sky_ghi     W/m^2, the clear-sky reference itself
 
 const MINUTES_PER_STEP = 5;
+const NEM_OFFSET_MS = 10 * 3600_000;
+
+/**
+ * The NEM-local time-of-day and month a state should carry.
+ *
+ * @param {number} epochMs UTC epoch milliseconds
+ * @returns {{tod_minutes: number, month: number}} month is 1-12
+ */
+export function nemDayParts(epochMs) {
+  const d = new Date(epochMs + NEM_OFFSET_MS);
+  return {
+    tod_minutes: d.getUTCHours() * 60 + d.getUTCMinutes(),
+    month: d.getUTCMonth() + 1,
+  };
+}
 
 /**
  * Constrain a forecast to what the machine can physically do.
@@ -40,7 +69,25 @@ const MINUTES_PER_STEP = 5;
 function clip(mw, capacityMw) {
   if (!Number.isFinite(mw)) return 0;
   if (mw < 0) return 0;
+  // An unknown nameplate offers no ceiling to clip against. Clamping at zero is
+  // still right and is the whole of what can honestly be asserted.
+  if (!(capacityMw > 0)) return mw;
   return mw > capacityMw ? capacityMw : mw;
+}
+
+/**
+ * The nameplate to normalise by, or null when there is not a usable one.
+ *
+ * The registry carries `capacity_mw: null` for every station AEMO has not
+ * published a registered capacity for — 271 of 700 today — and every learned
+ * expert here divides by it. A null reaching that division writes NaN
+ * into the fitted weights, the covariance and the analogue library, where it
+ * stays for the rest of the run, and clip() then reports the wreckage as a
+ * confident zero. So it has to be caught before the division, not after.
+ */
+function capacityOf(state) {
+  const c = state.capacity_mw;
+  return Number.isFinite(c) && c > 0 ? c : null;
 }
 
 /** Minutes past local midnight at t+h, wrapping over the day boundary. */
@@ -128,6 +175,8 @@ export class DiurnalClimatology {
   }
 
   update(state, actual) {
+    // A single NaN folded into a running mean stays in that cell forever.
+    if (!Number.isFinite(actual)) return;
     const h = state.horizon_steps ?? 1;
     const bucket = Math.floor(todAt(state, h) / BUCKET_MINUTES);
     accumulate(this.cells, state.month * BUCKETS_PER_DAY + bucket, actual);
@@ -142,20 +191,24 @@ export class DiurnalClimatology {
 // Both curves are expressed as a fraction of nameplate, which is what makes a
 // fitted shape comparable — and reusable — across stations of different sizes.
 export const DEFAULT_WIND_CURVE = { yMin: 0, yMax: 0.98, k: 0.62, v50: 9.5 };
-export const DEFAULT_SOLAR_CURVE = { gain: 0.95, offset: 0 };
+// tempCoeff is the fraction of output lost per degC of cell temperature above
+// 25, which is the same quantity fitSolarCurve() estimates per station. There
+// is deliberately no intercept: a panel in the dark makes nothing, and an
+// offset term only ever buys a little training error at the cost of a
+// physically impossible forecast at dawn.
+export const DEFAULT_SOLAR_CURVE = { gain: 0.95, tempCoeff: 0.004 };
 
 const CUT_IN_MS = 3;
 const CUT_OUT_MS = 25;
 
 const REFERENCE_IRRADIANCE = 1000;  // W/m^2, the condition a module is rated at
-const DERATE_PER_DEGC = 0.004;      // silicon loses about 0.4%/degC above 25
 const CELL_RISE_PER_WM2 = 0.03;     // NOCT: roughly 30 degC above ambient at full sun
 
 /**
  * Four-parameter logistic wind power curve, in fraction of nameplate.
  *
  * @param {number} speed m/s at hub height
- * @param {{yMin:number,yMax:number,k:number,v50:number}} [p]
+ * @param {{yMin:number,yMax:number,k:number,v50:number,cutOut?:number}} [p]
  */
 export function windFraction(speed, p = DEFAULT_WIND_CURVE) {
   if (!Number.isFinite(speed)) return 0;
@@ -164,8 +217,12 @@ export function windFraction(speed, p = DEFAULT_WIND_CURVE) {
   // cut-out the machine feathers and stops to protect itself. A farm at full
   // output drops to zero within minutes when a front pushes it past cut-out,
   // and no smooth sigmoid reproduces that.
-  if (speed < CUT_IN_MS || speed > CUT_OUT_MS) return 0;
-  return p.yMin + (p.yMax - p.yMin) / (1 + Math.exp(-p.k * (speed - p.v50)));
+  const cutOut = Number.isFinite(p.cutOut) ? p.cutOut : CUT_OUT_MS;
+  if (speed < CUT_IN_MS || speed > cutOut) return 0;
+  const f = p.yMin + (p.yMax - p.yMin) / (1 + Math.exp(-p.k * (speed - p.v50)));
+  // A malformed parameter set must not leak NaN into the combiner, where one
+  // round of it takes an expert's weight out permanently.
+  return Number.isFinite(f) ? f : 0;
 }
 
 /**
@@ -181,14 +238,58 @@ export function windFraction(speed, p = DEFAULT_WIND_CURVE) {
  * @param {number} csi clear-sky index (measured GHI / clear-sky GHI)
  * @param {number} clearSkyGhi W/m^2
  * @param {number} tempC ambient air temperature
- * @param {{gain:number,offset:number}} [p]
+ * @param {{gain:number,tempCoeff:number}} [p]
  */
 export function solarFraction(csi, clearSkyGhi, tempC, p = DEFAULT_SOLAR_CURVE) {
   if (!Number.isFinite(csi) || !Number.isFinite(clearSkyGhi) || clearSkyGhi <= 0) return 0;
   const ghi = Math.max(0, csi) * clearSkyGhi;
   const cellC = (Number.isFinite(tempC) ? tempC : 25) + CELL_RISE_PER_WM2 * ghi;
-  const derate = 1 - DERATE_PER_DEGC * Math.max(0, cellC - 25);
-  return Math.max(0, (p.gain * ghi / REFERENCE_IRRADIANCE + p.offset) * derate);
+  const tempCoeff = Number.isFinite(p.tempCoeff) ? p.tempCoeff : DEFAULT_SOLAR_CURVE.tempCoeff;
+  const derate = 1 - tempCoeff * Math.max(0, cellC - 25);
+  const f = (p.gain * ghi / REFERENCE_IRRADIANCE) * derate;
+  return Number.isFinite(f) ? Math.max(0, f) : 0;
+}
+
+/**
+ * Accept either bare curve parameters or a whole fit bundle from the offline
+ * fitter, and refuse anything that would evaluate to NaN.
+ *
+ * fitWindCurve() nests its logistic under `.params` and fitSolarCurve() returns
+ * `gain`/`tempCoeff` at the top level, so the two do not share a shape and
+ * neither matches the bare parameter object these curves take. Handing either
+ * one straight to windFraction()/solarFraction() reads undefined parameters,
+ * produces NaN, and clip() turns that into a flat zero — a wind farm forecast
+ * at nothing all season, with no error anywhere to notice. A failed fit is the
+ * same trap by another route: it returns every field null while still looking
+ * like a curve.
+ *
+ * @returns {object|null} null means "no usable fit", i.e. run the default
+ */
+function normaliseCurve(fueltech, curve) {
+  if (!curve || typeof curve !== 'object') return null;
+  if (curve.converged === false) return null;
+
+  if (fueltech === 'wind') {
+    const p = curve.params ?? curve;
+    for (const k of ['yMin', 'yMax', 'k', 'v50']) if (!Number.isFinite(p[k])) return null;
+    // The fitted cutIn is the 1% point of a logistic, which lands anywhere from
+    // below zero to a couple of m/s and is not a cut-in speed; the fitted
+    // cutOut is read off an observed collapse in output and is real, so only
+    // that one is carried through.
+    const cutOut = Number.isFinite(curve.cutOut) ? curve.cutOut : p.cutOut;
+    return { yMin: p.yMin, yMax: p.yMax, k: p.k, v50: p.v50, cutOut };
+  }
+
+  if (fueltech === 'solar_utility') {
+    const p = curve.params ?? curve;
+    if (!Number.isFinite(p.gain)) return null;
+    return {
+      gain: p.gain,
+      tempCoeff: Number.isFinite(p.tempCoeff) ? p.tempCoeff : DEFAULT_SOLAR_CURVE.tempCoeff,
+    };
+  }
+
+  return null;
 }
 
 /**
@@ -200,22 +301,24 @@ export class Physical {
   constructor({ fueltech, params = null } = {}) {
     this.name = 'physical';
     this.fueltech = fueltech;
-    this.params = params;
+    this.params = normaliseCurve(fueltech, params);
   }
 
   /** Install curve parameters once a fit exists; until then the default runs. */
   setParams(params) {
-    this.params = params;
+    this.params = normaliseCurve(this.fueltech, params);
   }
 
   predict(state, h) {
-    const cap = state.capacity_mw;
+    const cap = capacityOf(state);
     const w = outlook(state, h);
 
-    if (this.fueltech === 'wind') {
+    // Both curves are fractions of nameplate, so without a nameplate there is
+    // nothing to scale them by and this expert has nothing to say.
+    if (cap !== null && this.fueltech === 'wind') {
       return clip(cap * windFraction(w.wind_speed_100m, this.params || DEFAULT_WIND_CURVE), cap);
     }
-    if (this.fueltech === 'solar_utility') {
+    if (cap !== null && this.fueltech === 'solar_utility') {
       const f = solarFraction(
         w.clear_sky_index, w.clear_sky_ghi, w.temperature_2m,
         this.params || DEFAULT_SOLAR_CURVE,
@@ -226,7 +329,7 @@ export class Physical {
     // outcome. There is no curve to evaluate, so hold the last reading and let
     // the combiner discount this expert to the floor, which is the correct
     // answer rather than a failure.
-    return clip(state.history.at(-1), cap);
+    return clip(state.history.at(-1), state.capacity_mw);
   }
 
   // The curve is fitted offline over uncapped intervals only, because
@@ -256,10 +359,11 @@ function lag(history, back, cap) {
  * always zero is never excited, and an unexcited direction of the covariance
  * grows by 1/lambda every single step until it overflows.
  */
-function features(state, h) {
-  const cap = state.capacity_mw;
+function features(state, h, cap, into) {
   const hist = state.history;
-  const x = [1, lag(hist, 0, cap), lag(hist, 1, cap), lag(hist, 2, cap)];
+  const x = into;
+  x.length = 0;
+  x.push(1, lag(hist, 0, cap), lag(hist, 1, cap), lag(hist, 2, cap));
   const w = outlook(state, h);
 
   if (state.fueltech === 'wind') {
@@ -289,30 +393,50 @@ export class OnlineRidge {
     this.lambda = lambda;
     this.w = null;
     this.P = null;
+    // Scratch reused across calls. This runs once per station per horizon per
+    // dispatch interval — of the order of ten million times in a 90-day replay
+    // over sixty stations — and a fresh feature array and Px vector each time
+    // is a garbage collector pause every few seconds for no gain.
+    this._x = [];
+    this._Px = null;
   }
 
   _init(m) {
     this.w = new Float64Array(m);
     this.P = new Float64Array(m * m);
     for (let i = 0; i < m; i++) this.P[i * m + i] = RLS_DELTA;
+    this._Px = new Float64Array(m);
     this.m = m;
   }
 
   predict(state, h) {
-    const x = features(state, h);
+    const cap = capacityOf(state);
+    // Every coefficient is fitted against output over nameplate, so an unknown
+    // nameplate leaves nothing to scale the answer back up by.
+    if (cap === null) return clip(state.history.at(-1), state.capacity_mw);
+    const x = features(state, h, cap, this._x);
     if (!this.w) this._init(x.length);
     let y = 0;
     for (let i = 0; i < x.length; i++) y += this.w[i] * x[i];
-    return clip(y * state.capacity_mw, state.capacity_mw);
+    return clip(y * cap, cap);
   }
 
   update(state, actual) {
-    const x = features(state, state.horizon_steps ?? 1);
+    const cap = capacityOf(state);
+    // Dividing by a null nameplate puts NaN into w and P, and RLS has no path
+    // back out of that: every later update multiplies the NaN forward. Sitting
+    // the round out costs one sample.
+    if (cap === null || !Number.isFinite(actual)) return;
+    const x = features(state, state.horizon_steps ?? 1, cap, this._x);
     const m = x.length;
-    if (!this.w) this._init(m);
+    // The design vector's width is set by fueltech and never moves for a given
+    // station. If it ever did, w, P and the Px scratch would be sized for the
+    // old one and every index below would read across rows; starting the fit
+    // again is the only coherent response.
+    if (!this.w || m !== this.m) this._init(m);
     const P = this.P;
 
-    const Px = new Float64Array(m);
+    const Px = this._Px;
     let xPx = 0;
     let yhat = 0;
     for (let i = 0; i < m; i++) {
@@ -323,7 +447,7 @@ export class OnlineRidge {
       yhat += this.w[i] * x[i];
     }
     const denom = this.lambda + xPx;
-    const err = actual / state.capacity_mw - yhat;
+    const err = actual / cap - yhat;
 
     for (let i = 0; i < m; i++) this.w[i] += (Px[i] / denom) * err;
 
@@ -369,16 +493,17 @@ const LIBRARY_SIZE = 5000;
  * breeze and the nocturnal jet. Current output is in there too, because what
  * the plant is already doing is part of the situation being matched.
  */
-function conditionsVector(state, h) {
+function conditionsVector(state, h, cap) {
   const w = outlook(state, h);
   const angle = (todAt(state, h) * Math.PI) / 720;
+  const last = state.history.at(-1);
   return [
     (Number.isFinite(w.wind_speed_100m) ? w.wind_speed_100m : 0) / 15,
     Number.isFinite(w.clear_sky_index) ? w.clear_sky_index : 0,
     ((Number.isFinite(w.temperature_2m) ? w.temperature_2m : 20) - 20) / 20,
     Math.sin(angle),
     Math.cos(angle),
-    (state.history.at(-1) ?? 0) / state.capacity_mw,
+    (Number.isFinite(last) ? last : 0) / cap,
   ];
 }
 
@@ -404,13 +529,16 @@ export class Analogue {
   }
 
   predict(state, h) {
-    const cap = state.capacity_mw;
-    if (this.lib.length < ANALOGUE_K) {
+    const cap = capacityOf(state);
+    // The last component of the conditions vector is output over nameplate; a
+    // null nameplate makes the whole query NaN, every distance NaN, and the
+    // weighted mean NaN, which clip() then serves as a confident zero.
+    if (cap === null || this.lib.length < ANALOGUE_K) {
       this._matches = [];
-      return clip(state.history.at(-1), cap);
+      return clip(state.history.at(-1), state.capacity_mw);
     }
 
-    const q = conditionsVector(state, h);
+    const q = conditionsVector(state, h, cap);
     // Partial selection into a 25-slot list rather than sorting the library:
     // this runs for every station at every horizon at every one of 25,920
     // intervals in a 90-day replay.
@@ -449,9 +577,13 @@ export class Analogue {
   }
 
   update(state, actual) {
+    const cap = capacityOf(state);
+    // A NaN vector in the library is permanent: it never compares far enough
+    // away to be rejected, so it wins a slot in every later neighbourhood.
+    if (cap === null || !Number.isFinite(actual)) return;
     const record = {
       at: state.observed_at,
-      vec: conditionsVector(state, state.horizon_steps ?? 1),
+      vec: conditionsVector(state, state.horizon_steps ?? 1, cap),
       y: actual,
     };
     // Ring buffer: overwriting the oldest slot keeps the library bounded through

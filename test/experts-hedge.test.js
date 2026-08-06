@@ -2,9 +2,10 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   Persistence, DiurnalClimatology, Physical, OnlineRidge, Analogue, RampAware,
-  buildExperts, windFraction, solarFraction,
+  buildExperts, windFraction, solarFraction, nemDayParts,
 } from '../app/js/models/experts.js';
 import { Hedge, defaultEta } from '../app/js/models/hedge.js';
+import { fitWindCurve, fitSolarCurve } from '../app/js/correlate.js';
 
 // Seeded so a failure is a real failure and not an unlucky draw.
 function rng(seed) {
@@ -157,6 +158,20 @@ test('combine and combineQuantiles use the current weights', () => {
   assert.equal(hedge.combine({ a: 10, b: 20 }), 15);
   assert.deepEqual(hedge.combineQuantiles({ a: [0, 10, 20], b: [10, 20, 30] }), [5, 15, 25]);
   assert.throws(() => hedge.combine({ a: 10 }), /no prediction supplied/);
+
+  // Uniform weights alone prove nothing: a combiner that ignored this.w and
+  // took a plain mean would pass everything above. Skew them and check the
+  // output moves with them.
+  for (let t = 0; t < 2000; t++) hedge.update({ a: 10, b: 20 }, 10, 100);
+  const w = hedge.weights();
+  assert.ok(w.a > 0.9, `expected the weights to have separated, got ${w.a}`);
+  const combined = hedge.combine({ a: 10, b: 20 });
+  assert.ok(Math.abs(combined - (10 * w.a + 20 * w.b)) < 1e-12);
+  assert.ok(combined < 11, `combine ignored the weights: ${combined}`);
+  const q = hedge.combineQuantiles({ a: [0, 10, 20], b: [10, 20, 30] });
+  assert.ok(Math.abs(q[1] - combined) < 1e-12);
+  // A weighted mean of clipped forecasts cannot escape the range they span.
+  for (const v of q) assert.ok(v >= 0 && v <= 30);
 });
 
 // ---------------------------------------------------------------------------
@@ -462,6 +477,195 @@ test('Analogue returns the matched instants and keeps its library bounded', () =
   const cold = new Analogue();
   assert.equal(cold.predict(query, 1), outputFor(9));
   assert.deepEqual(cold.matches(), []);
+});
+
+// ---------------------------------------------------------------------------
+// The curve handed to Physical is the one the offline fitter emits
+// ---------------------------------------------------------------------------
+
+test('Physical consumes a real fitWindCurve bundle instead of flatlining on it', () => {
+  const cap = 500;
+  const r = rng(41);
+  const speeds = [];
+  const outputs = [];
+  // Cut-out sits at 21, deliberately away from the 25 m/s nominal the forecast
+  // curve assumes when it is not told otherwise. A fixture that feathers at the
+  // default cannot tell a propagated cut-out from a missing one.
+  const TRUE_CUT_OUT = 21;
+  const truth = (v) => (v >= 3 && v < TRUE_CUT_OUT
+    ? cap * (0.97 / (1 + Math.exp(-0.6 * (v - 9))))
+    : 0);
+  for (let i = 0; i < 4000; i++) {
+    const v = 30 * r();
+    speeds.push(v);
+    outputs.push(Math.max(0, Math.min(cap, truth(v) + cap * 0.02 * gauss(r))));
+  }
+
+  const fit = fitWindCurve(speeds, outputs, cap);
+  assert.ok(fit.converged, `fixture fit failed: ${fit.reason}`);
+  // The logistic sits under `.params`; reading the bundle as though it were the
+  // parameters themselves gives four undefineds, NaN, and a clip to zero.
+  assert.ok(fit.params && Number.isFinite(fit.params.v50));
+
+  const s = state({
+    capacity_mw: cap, fueltech: 'wind', history: [320, 322, 325],
+    weather: { wind_speed_100m: 11 },
+  });
+  const fitted = new Physical({ fueltech: 'wind', params: fit }).predict(s, 1);
+  assert.ok(fitted > 0.5 * cap, `fitted curve produced ${fitted} MW at 11 m/s`);
+  assert.ok(Math.abs(fitted - truth(11)) < 0.08 * cap);
+
+  // The bare parameter object has to keep working too — including above the
+  // fitted cut-out, which is the only place the two paths can disagree. At
+  // 23 m/s this farm is feathered, but a bare `params` that dropped cutOut
+  // falls back to the 25 m/s nominal and forecasts it at full output.
+  assert.ok(Math.abs(fit.cutOut - TRUE_CUT_OUT) < 1, `fitted cut-out ${fit.cutOut}`);
+  assert.equal(new Physical({ fueltech: 'wind', params: fit.params }).predict(s, 1), fitted);
+
+  const gale = state({
+    capacity_mw: cap, fueltech: 'wind', history: [320, 322, 325],
+    weather: { wind_speed_100m: 23 },
+  });
+  assert.equal(new Physical({ fueltech: 'wind', params: fit }).predict(gale, 1), 0);
+  assert.equal(new Physical({ fueltech: 'wind', params: fit.params }).predict(gale, 1), 0);
+});
+
+test('Physical consumes a real fitSolarCurve bundle, derate and all', () => {
+  const cap = 200;
+  const r = rng(43);
+  const gain = 0.9;
+  const tempCoeff = 0.005;
+  const csi = [];
+  const ref = [];
+  const temp = [];
+  const outputs = [];
+  for (let i = 0; i < 3000; i++) {
+    const clearSky = 1000 * r();
+    const index = 0.2 + 0.8 * r();
+    const ambient = 15 + 20 * r();
+    const irradiance = index * clearSky;
+    const cell = ambient + 0.03 * irradiance;
+    csi.push(index);
+    ref.push(clearSky);
+    temp.push(ambient);
+    outputs.push(Math.max(0, Math.min(cap,
+      cap * gain * (irradiance / 1000) * (1 - tempCoeff * Math.max(0, cell - 25)))));
+  }
+
+  const fit = fitSolarCurve(csi, ref, temp, outputs, cap);
+  assert.ok(fit.converged, `fixture fit failed: ${fit.reason}`);
+  // The fitter names the derate `tempCoeff` and emits no intercept at all, so a
+  // curve keyed on `offset` reads undefined and the expert dies at zero.
+  assert.ok(Math.abs(fit.gain - gain) < 0.05 && Math.abs(fit.tempCoeff - tempCoeff) < 0.002);
+
+  const s = state({
+    capacity_mw: cap, fueltech: 'solar_utility', history: [100],
+    weather: { clear_sky_index: 0.9, clear_sky_ghi: 900, temperature_2m: 30 },
+  });
+  const fitted = new Physical({ fueltech: 'solar_utility', params: fit }).predict(s, 1);
+  const expected = cap * gain * 0.81 * (1 - tempCoeff * (30 + 0.03 * 810 - 25));
+  assert.ok(fitted > 0, 'fitted solar curve produced nothing in full sun');
+  assert.ok(Math.abs(fitted - expected) < 0.05 * cap, `${fitted} vs ${expected}`);
+});
+
+test('a fit that did not converge falls back to the default curve, not to zero', () => {
+  const failed = fitWindCurve([1, 2, 3], [0, 0, 0], 100);
+  assert.equal(failed.converged, false);
+
+  const s = state({
+    capacity_mw: 100, fueltech: 'wind', history: [40],
+    weather: { wind_speed_100m: 12 },
+  });
+  const expert = new Physical({ fueltech: 'wind', params: failed });
+  const y = expert.predict(s, 1);
+  assert.ok(y > 50, `a failed fit must not be installed, got ${y} MW at 12 m/s`);
+  assert.equal(y, new Physical({ fueltech: 'wind' }).predict(s, 1));
+
+  // And setParams() must reject it just as the constructor does.
+  const good = new Physical({ fueltech: 'wind' });
+  good.setParams(failed);
+  assert.equal(good.predict(s, 1), y);
+});
+
+// ---------------------------------------------------------------------------
+// A station with no registered capacity must not poison anything
+// ---------------------------------------------------------------------------
+
+test('a null capacity is sat out rather than folded into the fitted state as NaN', () => {
+  const bank = buildExperts({ fueltech: 'wind' });
+  const hedge = new Hedge({ names: bank.map((e) => e.name) });
+  const r = rng(53);
+
+  // Warm everything up on a station that does have a nameplate.
+  let history = [50, 52, 54];
+  for (let t = 0; t < 500; t++) {
+    const s = state({ capacity_mw: 100, fueltech: 'wind', history, tod_minutes: (t * 5) % 1440 });
+    const p = {};
+    for (const e of bank) p[e.name] = e.predict(s, 1);
+    const actual = 50 + 10 * gauss(r);
+    for (const e of bank) e.update(s, actual);
+    hedge.update(p, actual, 100);
+    history = [...history.slice(-5), actual];
+  }
+  const before = hedge.weights();
+
+  // The registry carries capacity_mw: null for a third of its stations.
+  const unknown = state({ capacity_mw: null, fueltech: 'wind', history: [50, 52, 54] });
+  const blind = {};
+  for (const e of bank) {
+    blind[e.name] = e.predict(unknown, 1);
+    assert.ok(Number.isFinite(blind[e.name]), `${e.name} returned ${blind[e.name]}`);
+    assert.ok(blind[e.name] >= 0);
+    e.update(unknown, 55);
+  }
+  hedge.update(blind, 55, null);
+
+  for (const [name, w] of Object.entries(hedge.weights())) {
+    assert.ok(Number.isFinite(w), `${name} weight went to ${w}`);
+    assert.equal(w, before[name], `${name} moved on a round that could not be scored`);
+  }
+
+  // Back on a real station, everything still works and nothing has gone NaN.
+  const s = state({ capacity_mw: 100, fueltech: 'wind', history: [50, 52, 54] });
+  for (const e of bank) {
+    const y = e.predict(s, 1);
+    assert.ok(Number.isFinite(y) && y >= 0 && y <= 100, `${e.name} returned ${y} after the blind round`);
+  }
+  for (const v of new OnlineRidge().P ?? []) assert.ok(Number.isFinite(v));
+});
+
+test('a non-finite prediction costs that expert the round, not the whole mixture', () => {
+  const hedge = new Hedge({ names: ['a', 'b'] });
+  hedge.update({ a: NaN, b: 50 }, 50, 100);
+  const w = hedge.weights();
+  assert.ok(Number.isFinite(w.a) && Number.isFinite(w.b));
+  assert.ok(w.b > w.a, 'the expert that actually forecast should have gained');
+  assert.ok(Math.abs(w.a + w.b - 1) < 1e-12);
+});
+
+test('a weight floor that cannot fit n times into one is rejected', () => {
+  assert.throws(() => new Hedge({ names: ['a', 'b', 'c'], weightFloor: 0.4 }), /too large/);
+});
+
+// ---------------------------------------------------------------------------
+// NEM local time
+// ---------------------------------------------------------------------------
+
+test('NEM day parts are UTC+10 year round and never observe daylight saving', () => {
+  // 03:00 UTC is 13:00 in NEM time. Civil time in Sydney and Melbourne would be
+  // 14:00 in January and 13:00 in July; a bank keyed on that would put January
+  // noon and July noon in different diurnal buckets.
+  const january = nemDayParts(Date.UTC(2026, 0, 15, 3, 0));
+  const july = nemDayParts(Date.UTC(2026, 6, 15, 3, 0));
+  assert.equal(january.tod_minutes, 13 * 60);
+  assert.equal(july.tod_minutes, 13 * 60);
+  assert.equal(january.month, 1);
+  assert.equal(july.month, 7);
+
+  // 14:00 UTC is midnight in NEM time, and the day has already rolled over.
+  const rollover = nemDayParts(Date.UTC(2026, 4, 31, 14, 0));
+  assert.equal(rollover.tod_minutes, 0);
+  assert.equal(rollover.month, 6);
 });
 
 test('the bank presents one interface and the hedge can drive it end to end', () => {

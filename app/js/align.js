@@ -119,6 +119,17 @@ export function interpolateToGrid(sourceTimes, sourceValues, targetTimes) {
   const out = new Float64Array(targetTimes.length);
 
   if (n === 0) throw new Error('interpolateToGrid: no source samples to interpolate from');
+
+  // A short value array reads past its end as undefined, which becomes NaN in
+  // the first secant and then spreads through every cubic that touches it. One
+  // NaN in a weather series poisons every feature built from it, and nothing
+  // upstream would report a length mismatch on its own.
+  if (sourceValues.length !== n) {
+    throw new Error(
+      `interpolateToGrid: ${n} times against ${sourceValues.length} values`
+    );
+  }
+
   if (n === 1) {
     out.fill(sourceValues[0]);
     return out;
@@ -128,6 +139,16 @@ export function interpolateToGrid(sourceTimes, sourceValues, targetTimes) {
   const d = new Float64Array(n - 1);
   for (let i = 0; i < n - 1; i++) {
     h[i] = sourceTimes[i + 1] - sourceTimes[i];
+    // Everything below — the bracket search, the secants, the limiter — assumes
+    // strictly increasing time. Fed a descending or duplicate-stamped series it
+    // returns plausible numbers rather than failing, so the order is checked
+    // here where it costs nothing rather than trusted.
+    if (!(h[i] > 0)) {
+      throw new Error(
+        `interpolateToGrid: source times must strictly increase, but ` +
+        `t[${i}]=${sourceTimes[i]} is followed by t[${i + 1}]=${sourceTimes[i + 1]}`
+      );
+    }
     d[i] = (sourceValues[i + 1] - sourceValues[i]) / h[i];
   }
 

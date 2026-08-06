@@ -41,6 +41,11 @@ export function pinballLoss(quantileLevel, predicted, actual) {
  * place this agrees exactly with crpsFromSamples when the levels are the sample
  * midpoints (i-0.5)/n.
  *
+ * The integral is taken as the plain mean over whatever levels arrive, so the
+ * levels have to be a fair sample of (0,1) — symmetric about 0.5 at the very
+ * least, or the CRPS-equals-absolute-error identity that lets this sit in a
+ * table beside MAE stops holding. Sample midpoints are the levels to use.
+ *
  * @param {{q: number, v: number}[]} quantiles sorted ascending by q
  * @param {number} actual
  * @returns {number} MW
@@ -98,6 +103,20 @@ export function skillScore(crpsModel, crpsBaseline) {
 }
 
 /**
+ * Every paired metric in this file walks `pred` and indexes `actual` alongside
+ * it. Hand it a shorter `actual` and the tail reads `undefined`, which makes the
+ * whole score NaN — but hand it a *longer* one and nothing complains at all: the
+ * extra observations are simply dropped and the number that comes back looks
+ * entirely reasonable. A ragged pair is a wiring mistake, and it has to be loud.
+ */
+function requirePaired(pred, actual, name) {
+  if (pred.length !== actual.length) {
+    throw new RangeError(`${name}: ${pred.length} predictions against ${actual.length} actuals`);
+  }
+  if (pred.length === 0) throw new RangeError(`${name}: nothing to score`);
+}
+
+/**
  * Mean absolute error over paired arrays.
  *
  * @param {ArrayLike<number>} pred
@@ -105,6 +124,7 @@ export function skillScore(crpsModel, crpsBaseline) {
  * @returns {number} MW
  */
 export function mae(pred, actual) {
+  requirePaired(pred, actual, 'mae');
   let sum = 0;
   for (let i = 0; i < pred.length; i++) sum += Math.abs(pred[i] - actual[i]);
   return sum / pred.length;
@@ -118,6 +138,7 @@ export function mae(pred, actual) {
  * @returns {number} MW
  */
 export function rmse(pred, actual) {
+  requirePaired(pred, actual, 'rmse');
   let sum = 0;
   for (let i = 0; i < pred.length; i++) {
     const d = pred[i] - actual[i];
@@ -135,6 +156,14 @@ export function rmse(pred, actual) {
  * @returns {number} percent
  */
 export function pctOfCapacity(errorMw, capacityMw) {
+  // Most of the station registry carries a null capacity — aggregated loads and
+  // registrations with no plant behind them. Dividing by that yields Infinity,
+  // which in a chart quietly rescales the axis until every honest bar is flat.
+  // A station with no capacity cannot be put on a percent-of-capacity axis at
+  // all, so refuse rather than emit a number that means nothing.
+  if (!Number.isFinite(capacityMw) || capacityMw <= 0) {
+    throw new TypeError(`pctOfCapacity needs a positive capacityMw, got ${capacityMw}`);
+  }
   return 100 * errorMw / capacityMw;
 }
 
@@ -143,9 +172,21 @@ export function pctOfCapacity(errorMw, capacityMw) {
  *
  * The quantile list gives the CDF at a handful of knots; between them the CDF is
  * taken as linear in value, which is the same assumption already implicit in
- * drawing the fan chart. Outside the outermost knots the value is pinned to that
- * knot's level — the tail shape beyond the widest quantile issued is simply not
- * information the forecast contained.
+ * drawing the fan chart. The tail shape beyond the outermost knot is genuinely
+ * not information the forecast contained, so an outcome out there is placed at
+ * the middle of the tail it landed in — all that is known is which tail.
+ *
+ * Pinning to the outermost knot's level instead is the trap, and it is not a
+ * small one. On a decile fan the 10% of outcomes below the 0.1 quantile all take
+ * the value 0.1, which falls in the *second* histogram bin: the first bin comes
+ * out empty and the second doubled, and a perfectly calibrated forecast is
+ * rejected at a p-value with 200 zeros after the point. The midpoint keeps the
+ * mass inside the tail region it belongs to.
+ *
+ * What it cannot do is resolve within that region — bins finer than the
+ * outermost quantile gap will show a spike there that is an artefact of the
+ * grid, not of calibration. Issue quantiles that reach further into the tails
+ * than the histogram bins if that matters.
  *
  * @param {{q: number, v: number}[]} quantiles sorted ascending by q
  * @param {number} actual
@@ -153,8 +194,8 @@ export function pctOfCapacity(errorMw, capacityMw) {
  */
 export function pitValue(quantiles, actual) {
   const last = quantiles.length - 1;
-  if (actual <= quantiles[0].v) return quantiles[0].q;
-  if (actual >= quantiles[last].v) return quantiles[last].q;
+  if (actual <= quantiles[0].v) return quantiles[0].q / 2;
+  if (actual >= quantiles[last].v) return (1 + quantiles[last].q) / 2;
 
   for (let i = 1; i <= last; i++) {
     const lo = quantiles[i - 1];
@@ -166,7 +207,7 @@ export function pitValue(quantiles, actual) {
       return span === 0 ? hi.q : lo.q + (hi.q - lo.q) * (actual - lo.v) / span;
     }
   }
-  return quantiles[last].q;
+  return (1 + quantiles[last].q) / 2;
 }
 
 /**
@@ -183,9 +224,17 @@ export function pitValue(quantiles, actual) {
  * @returns {{counts: number[], chiSquared: number, pValue: number, uniform: boolean}}
  */
 export function pitHistogram(pitValues, bins = 10) {
+  if (pitValues.length === 0) throw new RangeError('pitHistogram: no PIT values to test');
+
   const counts = new Array(bins).fill(0);
   for (let i = 0; i < pitValues.length; i++) {
-    counts[Math.min(bins - 1, Math.floor(pitValues[i] * bins))]++;
+    // Clamping both ends, not just the top. A PIT value below zero indexes
+    // counts[-1], which JavaScript accepts as a plain property: the value
+    // vanishes from the histogram while still counting towards the expected
+    // frequency below, so the chi-squared statistic inflates and a perfectly
+    // calibrated forecast gets rejected for a reason nothing on screen explains.
+    const bin = Math.floor(pitValues[i] * bins);
+    counts[bin < 0 ? 0 : (bin > bins - 1 ? bins - 1 : bin)]++;
   }
 
   const expected = pitValues.length / bins;
@@ -207,6 +256,7 @@ export function pitHistogram(pitValues, bins = 10) {
  * @returns {number} in [0,1]
  */
 export function coverage(intervals, actuals) {
+  requirePaired(intervals, actuals, 'coverage');
   let inside = 0;
   for (let i = 0; i < intervals.length; i++) {
     if (actuals[i] >= intervals[i].lo && actuals[i] <= intervals[i].hi) inside++;
@@ -223,6 +273,11 @@ export function coverage(intervals, actuals) {
  */
 export class RollingScore {
   constructor(window) {
+    // A zero-length ring makes the modulo return NaN and every mean after it,
+    // with nothing thrown along the way.
+    if (!Number.isInteger(window) || window < 1) {
+      throw new RangeError(`RollingScore window must be a positive integer, got ${window}`);
+    }
     this.buf = new Float64Array(window);
     this.head = 0;
     this.n = 0;

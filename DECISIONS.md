@@ -119,3 +119,5 @@ weights as a stacked ribbon directly beneath on the same time axis and the same
 | F1 | `END OF REPORT,n` is a data-row count | It is the total line count (C+I+D) |
 | F2 | The MWh-per-interval trap is pre-reform WEM only | Post-reform WEMDE `quantity` is MWh per interval too |
 | F3 | `DispatchIS_Reports` carries `DISPATCHLOAD` every 5 min | It carries no unit-level table; UIGF/SEMIDISPATCHCAP are next-day only |
+| F8 | CRPS is the mean pinball loss *and* equals MAE for a point forecast | The two differ by a factor of two; CRPS is twice the pinball integral |
+| F9 | `alpha += gamma * (targetCoverage − hit)` | That sign is positive feedback and drives alpha to a clamp; the update is `alpha += gamma * (hit − targetCoverage)` |

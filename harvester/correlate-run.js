@@ -1,4 +1,4 @@
-// Phase 4: run the correlation engine over the backfill and print what it finds.
+// Run the correlation engine over the backfill and print what it finds.
 //
 // This exists to answer one question before any model is built — is there
 // usable signal in this data at all? It needs no experts, no combiner and no
@@ -12,7 +12,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { correlateStation } from '../app/js/correlate.js';
-import { observedAt } from '../app/js/align.js';
+import { normaliseNemUnitSolution } from './normalise.js';
 import {
   airDensity, windPower, windShear, clearSkyGhi, clearSkyIndex, solarZenith,
 } from '../app/js/weather.js';
@@ -20,80 +20,6 @@ import {
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const DATA = path.join(HERE, '..', 'data');
 const safeFileName = (id) => encodeURIComponent(id).replace(/\*/g, '%2A');
-
-/**
- * Aggregate DUID-level dispatch rows to station level for one station.
- *
- * The two fields are stamped for different instants within the same row, so
- * they are emitted against the instants they actually describe rather than
- * against the row's settlement date.
- */
-function toStationSeries(rowsByInterval, station) {
-  const registered = new Set(
-    station.duids.filter((d) => d.dispatch_type !== 'LOAD').map((d) => d.duid),
-  );
-  if (registered.size === 0) return [];
-
-  // "Partial" has to mean units that normally report and did not, not units
-  // that are merely still on the register. Thermal stations carry retired plant
-  // in their registration — Callide A, Swanbank B, Torrens A all still resolve
-  // to a live station — and counting those as absent marks every interval
-  // partial, which then excludes the entire station from correlation. Coal came
-  // back with no rows at all until the denominator was the units that actually
-  // publish.
-  const duids = new Set();
-  for (const [, rows] of rowsByInterval) {
-    for (const r of rows) if (registered.has(r.DUID)) duids.add(r.DUID);
-  }
-  if (duids.size === 0) return [];
-
-  const out = [];
-  for (const [settlementMs, rows] of rowsByInterval) {
-    let output = 0;
-    let uigf = 0;
-    let cleared = 0;
-    let available = 0;
-    let capped = false;
-    let seen = 0;
-    let online = 0;
-    let anyUigf = false;
-
-    for (const r of rows) {
-      if (!duids.has(r.DUID)) continue;
-      seen++;
-      const mw = r.INITIALMW ?? 0;
-      output += mw;
-      if (mw > 1) online++;
-      cleared += r.TOTALCLEARED ?? 0;
-      available += r.AVAILABILITY ?? 0;
-      if (r.UIGF !== null && r.UIGF !== undefined) { uigf += r.UIGF; anyUigf = true; }
-      if (r.SEMIDISPATCHCAP === 1) capped = true;
-    }
-    if (seen === 0) continue;
-
-    // A value above 1.15x registered capacity is not a reading, it is a
-    // pipeline fault, and it must not reach a curve fit.
-    const cap = station.capacity_mw ?? Infinity;
-    const suspect = Number.isFinite(cap) && output > 1.15 * cap;
-
-    out.push({
-      station_id: station.station_id,
-      station_name: station.station_name,
-      capacity_mw: station.capacity_mw,
-      observed_at: observedAt(settlementMs, 'INITIALMW'),
-      output_mw: output,
-      uigf_mw: anyUigf ? uigf : null,
-      cleared_mw: cleared,
-      available_mw: available,
-      curtailed_mw: anyUigf ? uigf - cleared : null,
-      capped,
-      quality: suspect ? 'suspect' : seen < duids.size ? 'partial' : 'ok',
-      units_online: online,
-    });
-  }
-  out.sort((a, b) => a.observed_at - b.observed_at);
-  return out;
-}
 
 /** Weather series for one station, with the derived features attached. */
 async function loadWeather(station) {
@@ -144,22 +70,34 @@ export async function run({ days = 30, limit = null } = {}) {
   const wanted = new Set(stations.flatMap((s) => s.duids.map((d) => d.duid)));
 
   // One pass over the dispatch files, keeping only what these stations need.
-  const byInterval = new Map();
+  const rows = [];
   for (const f of files) {
     const day = JSON.parse(await fs.readFile(path.join(DATA, 'nem-dispatch', f), 'utf8'));
-    for (const r of day.rows) {
-      if (!wanted.has(r.DUID)) continue;
-      let bucket = byInterval.get(r.settlement_ms);
-      if (!bucket) { bucket = []; byInterval.set(r.settlement_ms, bucket); }
-      bucket.push(r);
-    }
+    for (const r of day.rows) if (wanted.has(r.DUID)) rows.push(r);
   }
-  const ordered = [...byInterval.entries()].sort((a, b) => a[0] - b[0]);
-  console.log(`Loaded ${files.length} days, ${ordered.length} intervals\n`);
+
+  // Station aggregation, netting, the two instants inside one row and every
+  // quality rule come from the ingest normaliser. A private copy here drifted
+  // from it in three ways that all survived as plausible-looking numbers:
+  // curtailment went unclamped and unrestricted to semi-scheduled units, so a
+  // coal station publishing UIGF=0 scored its whole output as negative
+  // curtailment; the capacity check tested the signed value, so no reading was
+  // ever too negative; and load DUIDs were dropped instead of subtracted.
+  const { observations, counts } = normaliseNemUnitSolution(rows, { stations });
+  const byStation = new Map();
+  for (const o of observations) {
+    let list = byStation.get(o.station_id);
+    if (!list) byStation.set(o.station_id, (list = []));
+    list.push(o);
+  }
+  console.log(
+    `Loaded ${files.length} days, ${counts.observations} observations ` +
+    `(${counts.ok} ok, ${counts.partial} partial, ${counts.suspect} suspect)\n`,
+  );
 
   const results = [];
   for (const station of stations) {
-    const series = toStationSeries(ordered, station);
+    const series = byStation.get(station.station_id) ?? [];
     if (series.length === 0) continue;
     const weather = await loadWeather(station);
     if (weather.length === 0) continue;

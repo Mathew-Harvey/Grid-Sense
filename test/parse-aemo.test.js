@@ -1,4 +1,6 @@
-// Spec §11 tests 1 and 4: the nested-format parser and the no-DST rule.
+// The two things about AEMO's dispatch files that silently corrupt everything
+// downstream if they are got wrong: the nested record format, and the fact that
+// NEM time never shifts for daylight saving.
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -71,8 +73,9 @@ test('an unquoted comma that lengthens a row throws instead of decoding to garba
   assert.throws(() => parseAemo(shifted), /shape mismatch/i);
 });
 
-// Spec §11 test 4 — NEM time is AEST (UTC+10) permanently and never observes
-// daylight saving, in any region, on any date.
+// NEM time is AEST (UTC+10) permanently and never observes daylight saving, in
+// any region, on any date. Reading these stamps through a timezone library that
+// knows about Australian civil time shifts half the year by an hour.
 test('NEM timestamps use a fixed UTC+10 offset across the DST boundary', () => {
   // First Sunday in October 2026 is the 4th: the date NSW/VIC/SA/TAS clocks
   // would spring forward. NEM time does not.

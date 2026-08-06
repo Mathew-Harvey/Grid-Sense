@@ -55,7 +55,8 @@ export async function fetchScada(fileName, registry) {
 export async function pollScada(registry, since = null) {
   const files = await listScadaFiles();
   const fresh = since ? files.filter((f) => f > since) : files.slice(-1);
-  if (!fresh.length) return { files: [], latest: since, observations: [], unknown_units: [], counts: null };
+  // An empty poll still answers in the shape the caller handles every minute.
+  if (!fresh.length) return { files: [], latest: since, ...normaliseNemScada([], registry) };
 
   const rows = [];
   for (const f of fresh) rows.push(...await scadaRows(f));

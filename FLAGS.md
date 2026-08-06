@@ -204,3 +204,81 @@ invert with the season.
 Thermal stations are therefore recorded and excluded from the forecast-skill
 exit condition, exactly as intended. No action needed; noted so the negative
 numbers are not later mistaken for a modelling opportunity.
+
+---
+
+## F8 — [SPEC] CRPS "reduces to the mean pinball loss" and "equals MAE for a point forecast" cannot both be true
+
+The scoring brief asks for both, and they differ by exactly a factor of two:
+
+```
+CRPS(F, y) = 2 ∫₀¹ pinball_τ(F⁻¹(τ), y) dτ
+```
+
+Plain mean pinball therefore scores a deterministic forecast at **half** its
+absolute error. Taken literally, CRPS and MAE stop being comparable quantities,
+and every skill score taken against an MAE-flavoured persistence baseline comes
+out 2× wrong in a way nothing on the dashboard would reveal.
+
+`crps()` in `app/js/models/score.js` implements `2 × mean pinball`. Two
+independent checks that the factor belongs there:
+
+- a deterministic forecast now scores exactly its absolute error, and the mean
+  over a series equals MAE;
+- `crps()` on the sample midpoints `(i−0.5)/n` agrees with `crpsFromSamples()`
+  — the energy form `mean|X−y| − ½·mean|X−X′|`, which contains no free constant
+  — to 1e-12.
+
+**Status:** resolved in code. Flagged because it silently rescales the headline
+skill number, which is the one figure the whole build exists to produce.
+
+---
+
+## F9 — [SPEC] The stated adaptive-conformal update has the sign of the feedback backwards
+
+The brief gives
+
+```
+alpha += gamma * (targetCoverage − hit)
+```
+
+with `alpha` as miscoverage and the band taken at level `1 − alpha`. That is
+positive feedback: a **miss raises** alpha, which **lowers** the working level
+and makes the next band **narrower**, which causes more misses. Alpha walks to
+whichever clamp it reaches first and stays there, and coverage is then whatever
+the clamp happens to give.
+
+`AdaptiveConformal.update()` implements
+
+```
+alpha += gamma * (hit − targetCoverage)
+```
+
+Verified independently of the module, on synthetic heteroscedastic noise over
+20,000 intervals, running both signs through the same harness:
+
+| Nominal | `alpha += g(hit − target)` | `alpha += g(target − hit)` (as briefed) |
+|---|---|---|
+| 80% | **0.8130** | **0.9991** — alpha pinned at its lower clamp |
+| 90% | **0.8990** | **0.5118** — alpha pinned at its upper clamp |
+
+The briefed sign does not merely drift, it saturates, and which way it saturates
+depends on the target. A 90% band built that way covers 51% of outcomes — the
+precise failure the brief itself calls out as lying to the user, written into
+the specification of the thing meant to prevent it.
+
+which is the Gibbs–Candès adaptive conformal update written in hit form, and
+whose only stationary point is `E[hit] = targetCoverage`. Measured over 80 seeds
+of a 5000-interval run with the Laplace error scale swinging tenfold: worst
+deviation 0.94 pp at 90% nominal and 1.30 pp at 80%.
+
+A related trap sits next to it. An alpha clamp of `[0.001, 0.5]` looks harmless
+and is not: a ceiling of 0.5 stops the band ever tightening below the *median*
+retained error, so whenever the window still holds errors from a wilder period
+the model over-covers and the loop has no authority left to pull it back. That
+cap alone held 80% nominal coverage at 0.829. The range is `[0, 1]`, both ends
+of which are already degenerate.
+
+**Status:** resolved in code. Flagged because the wrong sign does not throw, does
+not look wrong in a chart, and produces a band that is confidently the wrong
+width.

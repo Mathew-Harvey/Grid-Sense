@@ -29,7 +29,11 @@ const INTERVAL_MS = 5 * 60_000;
 const CAPACITY_TOLERANCE = 1.15;
 
 // A unit idling on house load reads a fraction of a MW, so "online" needs a
-// floor above zero rather than a test against it.
+// floor above zero rather than a test against it. The test is on magnitude: a
+// battery drawing 60 MW to charge is unambiguously running, and a signed test
+// would report the whole station as offline for every charging interval —
+// exactly the half of a battery's duty cycle that a charge/discharge model
+// needs to see.
 const ONLINE_MW = 1;
 
 export const UNIT = { MW: 'MW', MWH_PER_INTERVAL: 'MWh_per_interval' };
@@ -56,6 +60,35 @@ export function toMW(value, unit, intervalMinutes) {
 
 /** Sums of float telemetry accumulate noise; kW resolution is well past what SCADA carries. */
 const round3 = (v) => (v == null ? null : Math.round(v * 1000) / 1000);
+
+const ISO_OFFSET = /(?:Z|[+-]\d{2}:?\d{2})$/;
+
+/**
+ * Parse a WEMDE timestamp, which must carry its UTC offset.
+ *
+ * This is the time equivalent of the unit trap, and it fails the same silent
+ * way. `Date.parse("2026-08-05T08:00:00")` — an ISO date-time with no offset —
+ * is defined to mean *host local time*, so the same file yields 00:00Z on a
+ * Perth box, 08:00Z here and 12:00Z on a US-east box. Nothing throws and no row
+ * is dropped; every observation simply lands on the wrong instant, and the
+ * weather alignment downstream then correlates output against the wrong hour of
+ * sun. An offset is present on every row AEMO publishes today, so demand it
+ * rather than inherit whatever the host clock happens to be set to.
+ *
+ * @param {string} s ISO-8601 with an explicit offset, e.g. 2026-08-05T08:00:00+08:00
+ * @returns {number} UTC epoch ms
+ */
+export function parseWemTimestamp(s) {
+  if (typeof s !== 'string' || !ISO_OFFSET.test(s.trim())) {
+    throw new Error(
+      `WEM timestamp ${JSON.stringify(s)} carries no UTC offset. ` +
+      `A timestamp without a declared offset cannot be read, only guessed at from the host timezone.`
+    );
+  }
+  const t = Date.parse(s);
+  if (Number.isNaN(t)) throw new Error(`Unparseable WEM timestamp ${JSON.stringify(s)}`);
+  return t;
+}
 
 function duidIndex(registry) {
   const index = new Map();
@@ -249,7 +282,7 @@ export function normaliseNemScada(rows, registry) {
     b.actualUnits.add(r.DUID);
     if (mw != null) {
       b.output = (b.output ?? 0) + mw;
-      if (mw > ONLINE_MW) b.online++;
+      if (Math.abs(mw) > ONLINE_MW) b.online++;
     }
   }
 
@@ -287,7 +320,7 @@ export function normaliseNemUnitSolution(rows, registry) {
     actual.actualUnits.add(r.DUID);
     if (mw != null) {
       actual.output = (actual.output ?? 0) + mw;
-      if (mw > ONLINE_MW) actual.online++;
+      if (Math.abs(mw) > ONLINE_MW) actual.online++;
     }
 
     const target = bucketFor(buckets, meta.station, t);
@@ -347,8 +380,9 @@ function facilityIndex(registry) {
  * Normalise a WEMDE facilityScada trading-day file.
  *
  * quantity is MWh per five-minute interval, not MW — verified against
- * registered capacity, see FLAGS.md F2 — and dispatchInterval carries an
- * explicit +08:00 offset, so the epoch conversion needs no timezone rule.
+ * registered capacity, see FLAGS.md F2 — and dispatchInterval must carry an
+ * explicit offset, which is checked rather than assumed so no host timezone can
+ * reinterpret the instant.
  * WEM publishes no dispatch target, forecast or cap, so those fields stay null;
  * the facility series is already signed net, positive out and negative in.
  *
@@ -368,8 +402,7 @@ export function normaliseWem(json, registry) {
 
     // WEMDE stamps an interval with its start: a trading day runs 08:00 to
     // 07:55, which only closes if 08:00 is the first interval's opening.
-    const t = Date.parse(r.dispatchInterval);
-    if (Number.isNaN(t)) continue;
+    const t = parseWemTimestamp(r.dispatchInterval);
 
     noteUnit(expected, station, r.code);
     const b = bucketFor(buckets, station, t);
@@ -377,7 +410,7 @@ export function normaliseWem(json, registry) {
     b.actualUnits.add(r.code);
     if (mw != null) {
       b.output = (b.output ?? 0) + mw;
-      if (mw > ONLINE_MW) b.online++;
+      if (Math.abs(mw) > ONLINE_MW) b.online++;
     }
   }
 

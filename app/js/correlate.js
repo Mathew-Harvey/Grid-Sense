@@ -488,6 +488,13 @@ export function fitWindCurve(speeds, outputs, capacityMw) {
     rmse: null, params: null, n: v.length, predict: null,
   });
 
+  // Every parameter here is a fraction of nameplate, so without a positive
+  // nameplate there is nothing to take a fraction of. The registry carries a
+  // null or zero capacity for plant it could not size, and dividing by it turns
+  // the whole fit into infinities that still answer to `converged`.
+  if (!Number.isFinite(capacityMw) || capacityMw <= 0) {
+    return fail('no registered capacity to scale the curve against');
+  }
   if (v.length < MIN_CURVE_POINTS) return fail('too few uncapped intervals to fit');
 
   const sortedY = [...y].sort((a, b) => a - b);
@@ -544,7 +551,11 @@ export function fitWindCurve(speeds, outputs, capacityMw) {
 
   const p = fit.x.map((value, i) =>
     Math.min(PARAM_BOUNDS[i][1], Math.max(PARAM_BOUNDS[i][0], value)));
-  const params = { yMin: p[0], yMax: p[1], k: p[2], v50: p[3] };
+  // cutOut travels inside the parameter object as well as beside it. A caller
+  // that hands the bare `params` to the forecast curve would otherwise silently
+  // fall back to a nominal 25 m/s, and a farm that actually feathers at 21 would
+  // be forecast at full output in the gale that shut it down.
+  const params = { yMin: p[0], yMax: p[1], k: p[2], v50: p[3], cutOut };
 
   // Speed at which the logistic reaches a given fraction of its own span.
   const speedAt = (frac) => params.v50 + Math.log(frac / (1 - frac)) / params.k;
@@ -629,6 +640,11 @@ export function fitSolarCurve(clearSkyIndex, ghi, tempC, outputs, capacityMw) {
   const fail = (reason) => ({
     converged: false, reason, gain: null, tempCoeff: null, rmse: null, n: suns.length, predict: null,
   });
+  // Same reason as the wind fit: gain is a fraction of nameplate, and a zero or
+  // missing capacity otherwise returns an infinite gain under `converged: true`.
+  if (!Number.isFinite(capacityMw) || capacityMw <= 0) {
+    return fail('no registered capacity to scale the curve against');
+  }
   if (suns.length < MIN_CURVE_POINTS) return fail('too few uncapped daylight intervals to fit');
 
   // Design columns: a = suns, b = suns * excessCellTemp. Coefficients are
@@ -820,18 +836,35 @@ export function correlateStation(observations, weather, fueltech) {
     if (i >= 0 && i < steps && Number.isFinite(o[target])) output[i] = o[target];
   }
 
-  let seenValue = null;
+  // A target with no finite values left at all counts as constant too: it is the
+  // extreme of the same condition, and reporting it as ordinary variation would
+  // present a panel of 0.000 correlations as a measured result.
+  let seenValue = 0;
+  let seenAny = false;
+  let varies = false;
   for (let i = 0; i < steps; i++) {
     const v = output[i];
     if (!Number.isFinite(v)) continue;
-    if (seenValue === null) seenValue = v;
-    else if (v !== seenValue) { bundle.target_constant = false; seenValue = NaN; break; }
+    if (!seenAny) { seenValue = v; seenAny = true; continue; }
+    if (v !== seenValue) { varies = true; break; }
   }
-  bundle.target_constant = seenValue !== null && !Number.isNaN(seenValue);
+  bundle.target_constant = !varies;
 
   if (!weather || weather.length === 0) return bundle;
-  const variables = Object.keys(weather[0])
-    .filter((k) => k !== 'observed_at' && Number.isFinite(weather[0][k]));
+  // Scanned across every record, not just the first. Providers return nulls at
+  // the edges of a backfill window, and a single null in record zero used to
+  // delete that variable from the whole station silently — for a solar farm that
+  // is clear_sky_index, the one variable the station is judged on.
+  const variables = [];
+  const seenVariable = new Set();
+  for (const record of weather) {
+    for (const k of Object.keys(record)) {
+      if (k === 'observed_at' || seenVariable.has(k)) continue;
+      if (!Number.isFinite(record[k])) continue;
+      seenVariable.add(k);
+      variables.push(k);
+    }
+  }
   const series = interpolateWeather(weather, variables, t0, steps);
 
   for (const name of variables) {

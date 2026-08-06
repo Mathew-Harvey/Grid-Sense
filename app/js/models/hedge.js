@@ -49,8 +49,17 @@ export class Hedge {
     // Settable at runtime: the UI exposes it, and a station whose regime shifts
     // hourly wants a livelier mixture than a baseload unit.
     this.eta = eta ?? defaultEta(this.names.length);
+    // n floors have to fit inside a unit budget with room to spare. Beyond that
+    // the pinned weights alone exceed one, _renormalise() has a negative
+    // remainder to share out, and the surviving experts take negative weights —
+    // which produces a forecast outside [0, capacity] and no error anywhere.
+    if (!(weightFloor >= 0) || weightFloor * this.names.length >= 1) {
+      throw new Error(`Hedge: weightFloor ${weightFloor} is too large for ${this.names.length} experts`);
+    }
     this.weightFloor = weightFloor;
     this.w = new Float64Array(this.names.length).fill(1 / this.names.length);
+    // Reused: update() runs once per station per horizon per dispatch interval.
+    this._loss = new Float64Array(this.names.length);
   }
 
   /** Current mixture weights by expert name, copied so the UI cannot mutate them. */
@@ -103,8 +112,15 @@ export class Hedge {
    * @param {number} capacityMw station nameplate
    */
   update(predictions, actual, capacityMw) {
+    // Every loss here is an error over nameplate. Without a nameplate, or
+    // without an actual, there is no round to score: the division yields NaN,
+    // every weight becomes NaN, and NaN never washes back out, so the mixture
+    // is dead for the rest of the run. 271 of the 700 stations in the registry
+    // carry a null capacity, so this is ordinary input, not an exotic one.
+    if (!(capacityMw > 0) || !Number.isFinite(actual)) return;
+
     const n = this.names.length;
-    const loss = new Float64Array(n);
+    const loss = this._loss;
     let best = Infinity;
     for (let i = 0; i < n; i++) {
       // Absolute error as a fraction of nameplate. Normalising by capacity is
@@ -112,7 +128,11 @@ export class Hedge {
       // left in MW, the same relative error moves the big station's weights
       // fifty times harder and they thrash. The clamp keeps losses inside the
       // [0,1] range the regret bound assumes.
-      const l = Math.min(1, Math.abs(pick(predictions, this.names[i]) - actual) / capacityMw);
+      const e = Math.abs(pick(predictions, this.names[i]) - actual) / capacityMw;
+      // An expert that returned something non-finite has not made a forecast.
+      // Charging it the maximum loss retires it toward the floor, where it can
+      // still recover; letting the NaN through would take the whole mixture.
+      const l = Number.isFinite(e) ? Math.min(1, e) : 1;
       loss[i] = l;
       if (l < best) best = l;
     }
