@@ -5,7 +5,11 @@
 // That is hundreds of thousands of points; the canvas libraries built for
 // dashboards drop frames at a tenth of this load.
 
-import uPlot from '../../../node_modules/uplot/dist/uPlot.esm.js';
+// Served by the harvester at /vendor, which is where node_modules is exposed.
+// A relative path out of app/ resolves to a URL the server does not route, and
+// the failure is a silent 404 that leaves every chart blank with the page
+// otherwise looking fine.
+import uPlot from '/vendor/uplot/dist/uPlot.esm.js';
 
 export { uPlot };
 

@@ -25,7 +25,7 @@ const WIDTHS = [
 
 const VIEWS = ['aggregate', 'station', 'training'];
 
-export async function shoot({ outDir, baseUrl = 'http://localhost:8080', settleMs = 4000 }) {
+export async function shoot({ outDir, baseUrl = 'http://localhost:8080', settleMs = 45_000 }) {
   await fs.mkdir(outDir, { recursive: true });
   // Pinned rather than left to Playwright's own resolution: the bundled browser
   // is provisioned at a versioned path here, and letting the library go looking
@@ -49,7 +49,7 @@ export async function shoot({ outDir, baseUrl = 'http://localhost:8080', settleM
       page.on('requestfailed', (r) =>
         messages.push(`[${size.name}] requestfailed: ${r.url()} ${r.failure()?.errorText ?? ''}`));
 
-      await page.goto(baseUrl, { waitUntil: 'networkidle', timeout: 60_000 }).catch((e) => {
+      await page.goto(baseUrl, { waitUntil: 'domcontentloaded', timeout: 60_000 }).catch((e) => {
         messages.push(`[${size.name}] goto failed: ${e.message}`);
       });
       // The replay and the first data load both settle asynchronously, and a

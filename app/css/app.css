@@ -344,3 +344,72 @@ footer .disclaimer { color: var(--text-dim); }
 @media (prefers-reduced-motion: reduce) {
   * { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
 }
+
+/* ---- replay transport --------------------------------------------------- */
+
+.transport {
+  display: flex;
+  align-items: center;
+  gap: var(--s3);
+  flex-wrap: wrap;
+  font-size: 12px;
+}
+
+.transport button {
+  appearance: none;
+  background: var(--raised-2);
+  border: 1px solid var(--rule-strong);
+  border-radius: var(--radius);
+  color: var(--text);
+  font-family: var(--font-data);
+  font-size: 12px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  padding: 6px 14px;
+  cursor: pointer;
+}
+
+.transport button:hover { border-color: var(--text-dim); }
+
+.transport label {
+  color: var(--text-faint);
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  font-size: 10px;
+}
+
+.transport input[type='range'] { accent-color: var(--state-predicted); width: 150px; }
+.transport output { color: var(--text-dim); min-width: 5ch; }
+
+/* ---- coverage rows ------------------------------------------------------ */
+
+.cov-row {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--s2);
+  padding: var(--s1) 0;
+  border-bottom: 1px solid var(--rule);
+  font-size: 13px;
+}
+
+.cov-row span:first-child { color: var(--text-faint); }
+.cov-row .warn { color: var(--state-curtailed); }
+
+/* Skill sign is carried by colour AND by the minus glyph the number already
+   has, so the table is readable without colour. */
+td.pos, .skill-value.pos { color: var(--skill-pos); }
+td.neg, .skill-value.neg { color: var(--skill-neg); }
+
+.quality > div { min-width: 90px; }
+
+/* `hidden` has to beat the layout rule that sets display on the same element.
+   Without this, `.grid` wins the cascade, all three views render stacked, and
+   every chart is built inside a container the browser reports as zero-width —
+   so uPlot falls back to a default size and draws straight through the page. */
+[hidden] { display: none !important; }
+
+/* A chart that outgrows its panel is a chart that has been handed the wrong
+   dimensions. Clipping stops one mis-sized canvas from making the whole page
+   scroll sideways while the diagnosis is still pending. */
+.chart { overflow: hidden; }
+.panel { overflow: hidden; }

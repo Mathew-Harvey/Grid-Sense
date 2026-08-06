@@ -342,3 +342,39 @@ any parameter.
 
 **Status:** open, with the next diagnostic identified. Recorded rather than
 tuned until the number looked acceptable.
+
+---
+
+## F12 — The conviction band renders as two clusters instead of one continuous series
+
+**The app now runs**, loads 55 stations over 6,048 intervals in about 8 seconds,
+and produces live skill scores. But the signature element does not draw
+correctly, so Loop D cannot pass.
+
+**Symptom.** The band chart shows a small cluster of data at the left edge and a
+faint trace at the right, with a wide empty gap between them, rather than one
+continuous history running up to a forward fan.
+
+**What has been ruled out.** Both were checked directly rather than assumed:
+
+- *Units.* `ring.t[k] = (state.t0 + i * MS_PER_STEP) / 1000` and
+  `nowSec` use the same seconds base, so history and the now-rule agree.
+- *Padding.* `size = ring.filled + forward` and every forward slot stamps its
+  own `t`, so there are no zero timestamps. A defensive filter for `t > 0` was
+  added in the view and changed nothing, which confirms it.
+- *Axis auto-range.* Pinning the x-scale to the finite data extent also changed
+  nothing, which is what says the gap is in the data rather than in the scale.
+
+**Most likely cause, untested.** The history ring is filled from the *scored*
+index, which trails the cursor by the horizon length, while the forward fan is
+stamped at `cursor - 1 + steps`. At the 24-hour horizon those differ by up to
+576 intervals, so the two halves of the series may genuinely be far apart in
+time with nothing in between. If so the fix is to stamp both from one clock,
+not to adjust the chart.
+
+**Consequence.** Loop D fails rubric item 5 — the conviction band is not the
+first thing the eye lands on, because there is nothing to land on. Loop E is
+also still unmeasured.
+
+**Status:** open, reproducible, with the next diagnostic named. Recorded rather
+than left as a chart that merely looks unfinished.

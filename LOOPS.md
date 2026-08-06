@@ -83,14 +83,19 @@ Measured on renewables, median across stations.
 **Exit:** three consecutive passes with no rubric failure, minimum three passes.
 **Max passes:** 7. Screenshots saved to `screenshots/loop-d-pass-N/`.
 
-**Not started — blocked.** The metric is a critique of screenshots and the view
-layer does not exist yet (FLAGS F10), so there is nothing to screenshot. The
-harness is built and verified against Chromium at `tools/screenshot.js`; the loop
-can begin the moment `main.js` and the three views land.
+**Running — 1 rubric failure outstanding.** The app boots, loads and renders;
+five passes have cleared four classes of defect. The remaining failure is rubric
+item 5: the conviction band draws as two separated clusters rather than one
+series, recorded with its diagnosis in FLAGS F12. Screenshots for every pass are
+in `screenshots/loop-d-pass-N/` at 1440, 1024 and 390 px.
 
 | Pass | Rubric failures | Change made |
 |---|---|---|
-| — | — | blocked on F10 |
+| 5 | 1 — rubric 5 (conviction band) | Pinned the x-scale to the finite data extent. No change, which is what established the gap is in the data rather than the scale (FLAGS F12). |
+| 4 | 2 — rubric 5, plus notes rendering as `[object Object]` | Trimmed zero timestamps; fixed note rendering so the data-quality strip carries real direction ("Weather stops at 2026-07-31, 5 days short of dispatch"). |
+| 3 | 3 | Reliability diagram was being handed histogram counts where it expects `{nominal, empirical}`. Console errors fell from 68 to 13, and the 13 remaining are 404s for a date past the end of the backfill. |
+| 2 | 4 | `hidden` was losing the cascade to `.grid`, so all three views rendered stacked and every chart was built in a zero-width container and drew straight through the page. Also fixed the worker crashing on "Invalid time value" — it keys IndexedDB by epoch and was being sent ISO strings. |
+| 1 | — | First run. uPlot was imported by a relative path resolving to `/node_modules`, which the server exposes at `/vendor` — a silent 404 that left every chart blank while the page otherwise looked fine. |
 
 ---
 

@@ -70,6 +70,25 @@ export function createConvictionBand(el, { getNowSec, showGhost = true } = {}) {
       // stops a band that is merely narrow from looking like a band that is
       // wide, purely because the axis rescaled under it.
       y: { range: (u, min, max) => [0, max * 1.05] },
+      // Pinned to the data rather than left to auto-range. One stray timestamp
+      // — a reserved forward slot that was never stamped, a lane still holding
+      // its fill value — stretches the axis and squeezes every real interval
+      // into a few pixels at one edge, which reads as a broken chart when the
+      // series underneath is perfectly good.
+      x: {
+        range: (u, min, max) => {
+          const t = u.data[0];
+          if (!t || t.length === 0) return [min, max];
+          let lo = Infinity, hi = -Infinity;
+          for (let i = 0; i < t.length; i++) {
+            const v = t[i];
+            if (!Number.isFinite(v) || v <= 0) continue;
+            if (v < lo) lo = v;
+            if (v > hi) hi = v;
+          }
+          return Number.isFinite(lo) && hi > lo ? [lo, hi] : [min, max];
+        },
+      },
     },
     plugins: [nowRulePlugin(getNowSec)],
     axes: [
