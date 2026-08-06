@@ -47,7 +47,7 @@ export function unzipAll(buf) {
 /**
  * List the files in a NEMWeb directory index. Filenames carry an opaque
  * incrementing ID that cannot be predicted, so the only way to find new files
- * is to read the directory listing (spec §5.1).
+ * is to read the directory listing.
  */
 export async function listNemwebDir(url, pattern = /PUBLIC_[A-Z_0-9#%]+\.zip/gi) {
   const res = await fetch(url, { signal: AbortSignal.timeout(60_000) });

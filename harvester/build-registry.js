@@ -1,14 +1,14 @@
 // Builds harvester/registry.json: the DUID -> station -> lat/lon/fueltech/capacity
 // mapping that everything else depends on.
 //
-// Spec §2.6 requires stations be resolved via a registry rather than string
-// prefix matching, and the live data shows exactly why: BW01..BW04 are
-// Bayswater, but BWTR1 — one character further along the same prefix — is
-// Broadwater Power Station, a different station in a different fuel class.
+// Stations are resolved through a registry rather than by string prefix, and
+// the live data shows exactly why: BW01..BW04 are Bayswater, but BWTR1 — one
+// character further along the same prefix — is Broadwater Power Station, a
+// different station in a different fuel class.
 // There is no naming rule to exploit: TARONG#1, STAN-1, CALL_B_1, MPP_1 and
 // CPP_3 all separate their unit numbers differently.
 //
-// Two sources, joined, each carrying its own provenance per §4.1:
+// Two sources, joined, each record carrying its own provenance:
 //
 //   AEMO MMSDM (authoritative, no key)     DUID -> STATIONID, region,
 //     PARTICIPANT_REGISTRATION.*           dispatch type, schedule type
@@ -37,7 +37,7 @@ const MMSDM_BASE =
 const OE_FACILITIES =
   'https://data.openelectricity.org.au/v3/geo/au_facilities.json';
 
-// Spec §4 controlled vocabulary. Open Electricity's own fuel_tech strings are
+// The controlled vocabulary. Open Electricity's own fuel_tech strings are
 // close but not identical, so they are mapped explicitly rather than passed
 // through — an unmapped value must fail loudly, not leak a new category into
 // the palette and the per-fueltech training targets.
@@ -313,7 +313,7 @@ export async function buildRegistry({ limit = 60, out = path.join(HERE, 'registr
   // modelled set is chosen weather-first rather than capacity-first: taking the
   // largest 60 stations outright yields just 13 renewables, and a dashboard
   // about weather-driven forecasting needs wind and solar, not another coal
-  // unit whose output weather does not explain (§2.9).
+  // unit whose output weather does not explain.
   const pick = (pred, n) => records.filter((s) => s.located && pred(s)).slice(0, n).map((s) => s.station_id);
   const isNem = (s) => s.network === 'NEM';
   const modelled = new Set([
