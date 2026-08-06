@@ -282,3 +282,63 @@ of which are already degenerate.
 **Status:** resolved in code. Flagged because the wrong sign does not throw, does
 not look wrong in a chart, and produces a band that is confidently the wrong
 width.
+
+---
+
+## F10 — The dashboard does not run: the view layer is incomplete
+
+**This is the largest outstanding gap and it blocks five acceptance criteria.**
+
+`app/index.html` loads `./js/main.js`, and that file does not exist. Present and
+tested: the design tokens, the layout CSS, the conviction band and expert
+ribbon, the power curve, the lag heatmap, the calibration charts, the replay
+worker and the data loader. Missing:
+
+| File | Role |
+|---|---|
+| `app/js/main.js` | boot, view switching, clocks, worker lifecycle, live polling |
+| `app/js/views/aggregate.js` | aggregate view |
+| `app/js/views/station.js` | station detail view |
+| `app/js/views/training.js` | training monitor |
+| `app/js/charts/fuelmix.js` | fuel mix stack |
+| `app/js/charts/pricelayer.js` | price overlay and revenue ribbon |
+
+Everything below the view layer is finished and independently verified, so this
+is assembly rather than design. Until it exists:
+
+- **Loop D (visual iteration) cannot start.** Its metric is a critique of
+  screenshots, and there is nothing to screenshot. The harness is built and
+  verified against Chromium (`tools/screenshot.js`), so the loop can begin the
+  moment the views land.
+- **Loop E (performance) cannot start.** Its metric is main-thread frame time
+  during replay, which needs a running page.
+- Cold-start-to-working-dashboard is unverifiable for the same reason.
+
+**Status:** honest gap, not a defect. Recorded rather than reported as done.
+
+---
+
+## F11 — Conformal coverage at the 24-hour horizon does not reach ±3pp
+
+Loop C reaches nominal at 5min, 30min and 1h (90.0 / 90.0 / 89.8 against a 90%
+target; 80.0 / 80.1 / 80.0 against 80%). It does not at the long horizons:
+
+| Horizon | 90% band | 80% band |
+|---|---|---|
+| 6h | 86.6% (3.4pp short) | 77.7% (2.3pp, inside) |
+| 24h | 83.8% (6.2pp short) | 75.3% (4.7pp short) |
+
+Three passes were spent on it. Raising `gamma` made it **worse**, not better —
+at 0.02 the six-hour band fell to 77.0%, so the loop overshoots rather than
+under-adapts. The change that did help was scoring the band actually issued
+rather than one recomputed from an alpha that had moved since, which brought 1h
+from 88.7% to 89.8%.
+
+The likely remaining cause is sample size rather than method: a 24-hour-ahead
+error series is heavily autocorrelated, so ~5,500 updates over 20 days contain
+far fewer independent outcomes than the short horizons do. The obvious next step
+is to re-run over the full 90 days rather than 20 and re-measure before changing
+any parameter.
+
+**Status:** open, with the next diagnostic identified. Recorded rather than
+tuned until the number looked acceptable.

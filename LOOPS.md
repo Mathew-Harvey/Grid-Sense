@@ -60,6 +60,11 @@ final 14 days.
 the PIT histogram passes a chi-squared uniformity test at p > 0.05.
 **Max passes:** 6.
 
+**Not reached — 3 of 5 horizons pass.** 5min, 30min and 1h sit within 0.2pp of
+nominal on both bands. 6h is 3.4pp short on the 90% band and 24h is 6.2pp short.
+Recorded in FLAGS F11 with the next diagnostic identified, rather than tuned
+until the number looked acceptable.
+
 Measured on renewables, median across stations.
 
 | Pass | 90% coverage by horizon (5min → 24h) | 80% coverage | Within ±3pp? | Change made |
@@ -78,9 +83,14 @@ Measured on renewables, median across stations.
 **Exit:** three consecutive passes with no rubric failure, minimum three passes.
 **Max passes:** 7. Screenshots saved to `screenshots/loop-d-pass-N/`.
 
+**Not started — blocked.** The metric is a critique of screenshots and the view
+layer does not exist yet (FLAGS F10), so there is nothing to screenshot. The
+harness is built and verified against Chromium at `tools/screenshot.js`; the loop
+can begin the moment `main.js` and the three views land.
+
 | Pass | Rubric failures | Change made |
 |---|---|---|
-| — | — | pending |
+| — | — | blocked on F10 |
 
 ---
 
@@ -92,9 +102,14 @@ loaded.
 block interaction.
 **Max passes:** 5.
 
+**Not started — blocked.** The metric is main-thread frame time during replay,
+which needs a running page (FLAGS F10). The worker is written and posts
+transferable buffers batched to one message per animation frame, which is the
+design the budget depends on, but it is unmeasured.
+
 | Pass | Frame time (p50 / p95) | Bottleneck fixed |
 |---|---|---|
-| — | — | pending |
+| — | — | blocked on F10 |
 
 ---
 
