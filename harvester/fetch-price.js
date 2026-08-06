@@ -21,10 +21,10 @@
 // still the right order of magnitude, still completely wrong.
 //
 // RRP is signed and it is not bounded by anything reassuring: it goes to
-// -$1,000/MWh when the grid is paying to shed generation and to $17,500/MWh when
-// it is short. Nothing here clamps, floors or sanitises it. A negative price is
-// the single most informative event in this market and a defensive Math.max
-// would erase it.
+// -$1,000/MWh when the grid is paying to shed generation and to five figures
+// when it is short. Nothing here clamps, floors or sanitises it. A negative
+// price is the single most informative event in this market and a defensive
+// Math.max would erase it.
 
 import { parseAemo, parseAemoTimestamp } from './parse-aemo.js';
 import { fetchBuffer, unzipSingle, listNemwebDir } from './fetch-util.js';
@@ -62,10 +62,25 @@ export const PRICE_FIELDS = {
   LOWERREGRRP: 'lower_reg_rrp',
 };
 
-/** Market price cap, $/MWh. */
-export const MARKET_PRICE_CAP = 17_500;
+/**
+ * Market price cap, $/MWh.
+ *
+ * Indexed every 1 July, so this is a value with an expiry date rather than a
+ * constant of nature. Measured rather than assumed: on 2026-07-13 16:20 TAS1
+ * solved at an unconstrained ROP of 23200.00144 and settled at an RRP of exactly
+ * 23200.00000 with APCFLAG set, which is AEMO clipping to the cap in force.
+ *
+ * The widely quoted 17,500 is a superseded year's figure. Carrying it here would
+ * mark every genuine cap-adjacent spike as out of band, and the first thing an
+ * alarm that cries wolf costs is the spike it was built to catch.
+ */
+export const MARKET_PRICE_CAP = 23_200;
 
-/** Market price floor, $/MWh. */
+/**
+ * Market price floor, $/MWh.
+ *
+ * Set in the Rules and not indexed, unlike the cap.
+ */
 export const MARKET_PRICE_FLOOR = -1000;
 
 // A price is the clearing outcome for the interval that ENDS at its settlement

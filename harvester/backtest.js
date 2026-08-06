@@ -1,4 +1,4 @@
-// Phase 5: the walk-forward backtest that produces the skill scores.
+// The walk-forward backtest that produces the skill scores.
 //
 // Everything here obeys one rule: at the moment a forecast is made, only data
 // that existed at that moment may touch it. Experts are updated strictly after

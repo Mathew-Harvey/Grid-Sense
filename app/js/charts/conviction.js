@@ -12,7 +12,7 @@
 // front at the same moment — so the naive band is visibly too narrow, and the
 // gap between the two is the clearest statement of why that matters.
 
-import { uPlot, COLOURS, baseOpts, nowRulePlugin, autoResize } from './base.js';
+import { uPlot, COLOURS, EXPERT_RAMP, baseOpts, nowRulePlugin, autoResize } from './base.js';
 
 const SERIES = {
   ACTUAL: 1,
@@ -119,10 +119,7 @@ export function createConvictionBand(el, { getNowSec, showGhost = true } = {}) {
 export function createExpertRibbon(el, expertNames, { getNowSec } = {}) {
   const { width, height } = el.getBoundingClientRect();
 
-  // Experts are ordered from "assumes nothing changes" to "carries the physics",
-  // so the ribbon reads bottom-to-top as increasing model commitment.
-  const RAMP = ['#3d4a52', '#4f6570', '#61818c', '#7ba0a6', '#9dbfb8', '#c6dcc9'];
-  const colourFor = (i) => RAMP[i % RAMP.length];
+  const colourFor = (i) => EXPERT_RAMP[i % EXPERT_RAMP.length];
 
   const opts = {
     ...baseOpts({ width: Math.max(width, 320), height: Math.max(height, 60) }),
