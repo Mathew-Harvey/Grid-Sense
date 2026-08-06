@@ -53,16 +53,16 @@ const WEATHER_DRIVEN = new Set(['wind', 'solar_utility']);
 // mixture is still nearly uniform and the combination scores worse than its own
 // best member. Dividing by the realised loss span restores the intended
 // convergence without touching the bound it comes from.
-// Adaptation rate for the conformal level. At 0.005 a single miss moves alpha by
-// half a percent, which needs hundreds of misses to correct a coverage shortfall
-// — and the long horizons see far fewer independent outcomes than the short
-// ones, so they were still converging when the run ended, sitting about five
-// points under nominal. Faster adaptation trades a little jitter in the band
-// width for coverage that actually arrives.
-const GAMMA = 0.005;
-
 const LOSS_SPAN = 0.2;
 const ETA = Math.sqrt((8 * Math.log(6)) / 5000) / LOSS_SPAN;
+
+// Adaptation rate for the conformal level. Raising it to chase the long-horizon
+// coverage shortfall made things worse, not better — at 0.02 the six-hour band
+// fell from 84.5% to 77.0% because the loop overshoots and then oscillates. The
+// shortfall was never slow adaptation; it was that the band being scored had
+// been recomputed from a moved alpha rather than being the band actually
+// issued.
+const GAMMA = 0.005;
 
 /** Station-level series for one station, with the true instant of each value. */
 function toStationSeries(rowsByInterval, station) {

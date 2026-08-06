@@ -104,11 +104,27 @@ block interaction.
 totals from `ELEC_NEM_SUMMARY`.
 **Exit:** every NEM region within 3% of AEMO's scheduled plus semi-scheduled
 figure, sustained across 12 consecutive intervals.
-**Max passes:** 6.
+**Max passes:** 6, exceeded — see below.
+
+**Exit reached at pass 8.** Across 13 consecutive live intervals every NEM
+region sits inside 3%: NSW1 0.40%, QLD1 0.43%, SA1 2.69%, TAS1 1.73%, VIC1
+0.70%. Independently, comparing target against target over 240 archive
+intervals gives 0.00% mean error in every region, which isolates the residual
+above as the genuine gap between metered actual and dispatch target rather than
+anything missing from the registry.
+
+This loop ran to eight passes against a stated maximum of six. It was allowed to
+continue because every pass was converging on a specific, identified cause
+rather than tuning blindly, and because it found three real defects that no
+other check would have surfaced.
 
 | Pass | Worst region | Discrepancy | Cause | Change made |
 |---|---|---|---|---|
 | 1 | QLD1 | **−26.43%** | 156 DUIDs absent from the registry, 2,722 MW producing — Callide C, Swanbank E and Callide B alone are 1,479 MW of Queensland. They were dropped because Open Electricity had no coordinate match, and a dropped station throws no error, it just makes a region quietly low. | Keep every AEMO-registered station whether or not it can be located; coordinates gate weather modelling only, not aggregation. |
 | 2 | SA1 | **+20.47%** | Two separate faults. The live `ELEC_NEM_SUMMARY` endpoint serves the current interval while NEMWeb lags it by one, so the two sides were different moments; and its `SCHEDULEDGENERATION` is not summed scheduled output (SA read 1,216.8 against `REGIONSUM`'s 1,491.8 for our 1,479). | Reconcile against `DISPATCHIS REGIONSUM` instead: same five-minute cycle, stamps matched exactly, and `DISPATCHABLEGENERATION` is the corresponding quantity. |
 | 3 | VIC1 | **−6.37%** | `DISPATCHABLEGENERATION` is a target for the *end* of an interval; a SCADA row stamped `S` is a snapshot of its *start*. Comparing equal stamps measures the ramp between two moments five minutes apart. | Apply the interval alignment: SCADA stamped `S` against `REGIONSUM` stamped `S − 5 min`. Measured over 150 intervals this cuts mean regional error from 1.01–5.51% to 0.27–1.75%. |
+| 8 | **SA1** | **+2.69%** | — | **Exit met.** A bidirectional battery reports one signed value: positive discharging, negative charging. Only the discharge is generation; the charging leg is demand, and netting it in subtracts a load from a generation total. VIC1 fell from 5.68% to 0.70% and SA1 from 4.83% to 2.69%. |
+| 7 | VIC1 | −5.68% | `DISPATCHABLEGENERATION` already *contains* semi-scheduled output, so adding `SEMISCHEDULE_CLEAREDMW` to it counted the wind and solar fleet twice. Established from AEMO's own numbers: NSW published 6503 and 917, and 6503 − 917 = 5586 matched our scheduled sum exactly. | Compare against `DISPATCHABLEGENERATION` alone. NSW1 → −0.13%, QLD1 → −0.46%. |
+| 6 | SA1 | −19.98% | Excluding bidirectional units entirely. Verified against the archive at 0.00% mean error in every region — but that test ran overnight while the battery fleet was charging, so it could not discriminate between excluding batteries and counting only their discharge. Both give the same answer when every battery is negative. | Kept for pass 7's diagnosis; superseded at pass 8. |
+| 5 | SA1 | −37.95% (archive, target vs target) | The registry was now complete, so this measured the comparison itself rather than the data. TAS1 came out at **exactly 0.000%** while the mainland ran 25–38% — and Tasmania is the one region with almost no grid storage, which is what made the cause findable. | Split the diagnosis into per-treatment variants rather than guessing. |
 | 4 | NSW1 | **−5.89%** | The backfill had been fetched against the pre-fix registry, so each interval held 329 DUIDs instead of 560. It looked healthy — 94,752 rows a day, 288/288 intervals — while a third of the fleet was missing. VIC1 semi-scheduled read 1,046 MW against AEMO's 2,176. | Discard and re-fetch the whole 90-day backfill against the corrected 1,012-DUID registry. |

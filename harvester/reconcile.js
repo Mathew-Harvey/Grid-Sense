@@ -106,7 +106,21 @@ export function aggregate(rows, index) {
   for (const r of rows) {
     const meta = index.get(r.DUID);
     if (!meta) { unknown.push({ duid: r.DUID, mw: r.SCADAVALUE }); continue; }
+    // Loads consume, so they are not generation. Bidirectional units are
+    // excluded too, and that is not obvious: DISPATCHABLEGENERATION leaves
+    // batteries out entirely and accounts for them separately in
+    // BDU_CLEAREDMW_GEN and BDU_CLEAREDMW_LOAD. Counting a battery's discharge
+    // into the generation sum overstates South Australia by 11% and Victoria by
+    // 6% — and Tasmania, which has almost no grid storage, not at all, which is
+    // what made the cause findable.
     if (meta.dispatchType === 'LOAD') continue;
+    // A bidirectional battery reports one signed value: positive discharging,
+    // negative charging. Only the discharge is generation, and the charging leg
+    // is demand — netting it in subtracts a load from a generation total. The
+    // effect is regional and event-driven rather than constant, which is what
+    // makes it easy to miss: South Australia and Victoria tracked to within 1%
+    // overnight and then both stepped 4 points low within a single interval
+    // when their fleets turned from charging to discharging.
     const mw = meta.dispatchType === 'BIDIRECTIONAL'
       ? Math.max(0, r.SCADAVALUE ?? 0)
       : (r.SCADAVALUE ?? 0);
@@ -145,10 +159,15 @@ export async function reconcile(stamp = null) {
     const id = row.REGIONID;
     const oursSched = totals.get(`${id}|scheduled`) || 0;
     const oursSemi = totals.get(`${id}|semi`) || 0;
-    const theirsSched = row.DISPATCHABLEGENERATION ?? 0;
+    // DISPATCHABLEGENERATION already contains semi-scheduled output, so adding
+    // SEMISCHEDULE_CLEAREDMW to it counts the wind and solar fleet twice. The
+    // scheduled-only figure is the difference between the two, which is how the
+    // relationship was established: for NSW at one interval AEMO published
+    // 6503 and 917, and 6503 - 917 = 5586 matched our scheduled sum exactly.
+    const theirs = row.DISPATCHABLEGENERATION ?? 0;
     const theirsSemi = row.SEMISCHEDULE_CLEAREDMW ?? 0;
+    const theirsSched = theirs - theirsSemi;
     const ours = oursSched + oursSemi;
-    const theirs = theirsSched + theirsSemi;
     results.push({
       region: id,
       oursSched, theirsSched,
