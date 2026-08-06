@@ -39,7 +39,7 @@ score improve teaches nothing about which one helped.
 
 | Pass | Median skill @1h | % stations >0 all horizons | Worst pair | Change made |
 |---|---|---|---|---|
-| — | — | — | — | pending |
+| 1 | **0.296** | 57% | solar @24h, median **−0.174** | Baseline walk-forward: six experts, Hedge, adaptive conformal, curtailment excluded from every learning path. Median @1h already clears 0.10. The 24h solar failure stands out because 24h solar should be the *easiest* case — the sun's schedule is known a day ahead — and persistence at 24h is itself strong for solar, since yesterday at this minute had the same solar geometry. The Physical expert was running on a default curve: `buildExperts` was being handed `curve: null`, so the one expert carrying the physics had no fitted physics to carry. |
 
 ---
 
@@ -51,9 +51,11 @@ final 14 days.
 the PIT histogram passes a chi-squared uniformity test at p > 0.05.
 **Max passes:** 6.
 
-| Pass | 80% coverage | 90% coverage | PIT chi-sq p | Change made |
+Measured on renewables, median across stations.
+
+| Pass | 90% coverage by horizon (5min → 24h) | 80% coverage | Within ±3pp? | Change made |
 |---|---|---|---|---|
-| — | — | — | — | pending |
+| 1 | 90.1 / 89.3 / 88.7 / 85.3 / 86.3 | 80.2 / 79.6 / 79.1 / 75.8 / 78.1 | short horizons yes, **6h and 24h no** | Baseline. Calibration is close to nominal where the error window sees many comparable intervals, and drifts low at the long horizons — at 6h the 90% band covers 85.3% and the 80% band 75.8%, both about 4.5pp short. |
 
 ---
 
