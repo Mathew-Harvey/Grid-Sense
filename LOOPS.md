@@ -37,8 +37,17 @@ predict a coal plant and a loop that tries will not terminate.
 **Max passes:** 8. One change per pass — changing three things and seeing the
 score improve teaches nothing about which one helped.
 
+**Exit reached at pass 3, held at pass 4.** Median renewable skill at the
+one-hour horizon is 0.301 against a 0.10 threshold, and 84% of wind and solar
+stations are positive at every horizon against an 80% threshold. Thermal is
+recorded and excluded as intended.
+
 | Pass | Median skill @1h | % stations >0 all horizons | Worst pair | Change made |
 |---|---|---|---|---|
+| 4 | **0.301** | **84%** | — | Scored the band that was actually issued rather than one recomputed at update time (see Loop C pass 3). Loop B stays past both thresholds. |
+| 3 | 0.297 | **86%** | — | **Conditional conformal scale.** Forecast error tracks generation level: a solar farm at midnight cannot be wrong, the same farm under broken cloud at noon can be wrong by most of its nameplate. One unconditional band has to cover both, so it is far too wide across the 60% of intervals that are night — and a probabilistic forecast that is exactly right all night still loses to persistence, because the score charges for width. Normalising residuals by `max(forecast, 0.05·capacity)` flipped solar @24h from **−0.236 to +0.075** and every cell in the table is now positive. |
+| 2b | 0.291 | 57% | solar @24h, **−0.236** | `eta` raised to match the realised loss span. Hedge's bound assumes losses in [0,1]; ours average 0.033–0.095, so each round multiplied a weight by ~0.997 and the mixture was still near-uniform after 5,000 rounds — the combination was scoring worse than its own best member. Helped the short horizons (wind 5min 0.202→0.256, 6h 0.423→0.478); did not touch solar @24h, which ruled out convergence as the cause. |
+| 2a | 0.308 | 57% | solar @24h, **−0.213** | Fed the fitted power curves into the Physical expert, which had been running on a generic default. Wind @24h 0.445→0.517. Solar unchanged, and the diagnosis showed why: for wind the Physical expert earns weight 0.749 with MAE 28.8 against persistence's 50.7, while for solar it earns 0.010 with MAE 21.4 against persistence's 9.3. |
 | 1 | **0.296** | 57% | solar @24h, median **−0.174** | Baseline walk-forward: six experts, Hedge, adaptive conformal, curtailment excluded from every learning path. Median @1h already clears 0.10. The 24h solar failure stands out because 24h solar should be the *easiest* case — the sun's schedule is known a day ahead — and persistence at 24h is itself strong for solar, since yesterday at this minute had the same solar geometry. The Physical expert was running on a default curve: `buildExperts` was being handed `curve: null`, so the one expert carrying the physics had no fitted physics to carry. |
 
 ---
@@ -55,6 +64,9 @@ Measured on renewables, median across stations.
 
 | Pass | 90% coverage by horizon (5min → 24h) | 80% coverage | Within ±3pp? | Change made |
 |---|---|---|---|---|
+| 3 | **90.0 / 90.0 / 89.8** / 86.6 / 83.8 | **80.0 / 80.1 / 80.0** / 77.7 / 75.3 | 5min, 30min and 1h **yes**; 6h marginal at 3.4pp; **24h no** | `update()` was recomputing the interval from the current alpha instead of scoring the band that was actually issued. At a six-hour horizon that band was made 72 intervals earlier and alpha had moved under it, so the feedback chased its own tail. Scoring the issued band brought 1h from 88.7 to 89.8 and 30min to exactly nominal. |
+| 2 | 90.0 / 87.9 / 86.1 / 77.0 / 80.2 | 80.2 / 78.4 / 76.5 / 68.1 / 70.7 | **worse** | Raised gamma to 0.02 on the theory that the long horizons were still converging. Coverage at 6h fell from 84.5 to 77.0 — the loop overshoots rather than under-adapts. Reverted. |
+| 1b | 90.0 / 89.3 / 88.7 / 84.5 / 84.0 | 80.0 / 79.3 / 78.8 / 74.4 / 76.3 | short horizons yes | Carried over from the conditional-scale change in Loop B pass 3. |
 | 1 | 90.1 / 89.3 / 88.7 / 85.3 / 86.3 | 80.2 / 79.6 / 79.1 / 75.8 / 78.1 | short horizons yes, **6h and 24h no** | Baseline. Calibration is close to nominal where the error window sees many comparable intervals, and drifts low at the long horizons — at 6h the 90% band covers 85.3% and the 80% band 75.8%, both about 4.5pp short. |
 
 ---

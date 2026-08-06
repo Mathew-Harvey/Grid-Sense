@@ -98,8 +98,8 @@ export class AdaptiveConformal {
    * @param {number} pointForecast MW
    * @returns {{lo: number, hi: number}}
    */
-  interval(pointForecast) {
-    const halfWidth = this.errorQuantile(1 - this.alpha);
+  interval(pointForecast, scale = 1) {
+    const halfWidth = this.errorQuantile(1 - this.alpha) * (scale > 0 ? scale : 1);
     return {
       lo: clamp(pointForecast - halfWidth, 0, this.capacityMw),
       hi: clamp(pointForecast + halfWidth, 0, this.capacityMw),
@@ -119,8 +119,13 @@ export class AdaptiveConformal {
    * @param {number} pointForecast MW
    * @param {number} actual MW
    */
-  update(pointForecast, actual) {
-    const { lo, hi } = this.interval(pointForecast);
+  update(pointForecast, actual, scale = 1, issued = null) {
+    // Score the band that was actually issued, not one recomputed now. At a
+    // six-hour horizon the forecast was made 72 intervals ago and alpha has
+    // moved under it since, so recomputing tallies coverage against a band the
+    // user never saw — and the feedback loop then chases its own tail instead
+    // of the realised hit rate.
+    const { lo, hi } = issued ?? this.interval(pointForecast, scale);
     const hit = actual >= lo && actual <= hi ? 1 : 0;
     this.hits += hit;
     this.updates++;
@@ -138,7 +143,12 @@ export class AdaptiveConformal {
     );
 
     if (this.n < this.errors.length) this.n++;
-    this.errors[this.head] = Math.abs(actual - pointForecast);
+    // Residuals are stored in units of the conditional scale, so a night-time
+    // error on a solar farm and a broken-cloud error at noon land on the same
+    // ruler. Without that, one band width has to serve both, and it is
+    // absurdly wide at night and too narrow at midday — which is precisely how
+    // a forecast that is right every night still scores worse than persistence.
+    this.errors[this.head] = Math.abs(actual - pointForecast) / (scale > 0 ? scale : 1);
     this.head = (this.head + 1) % this.errors.length;
     this.stale = true;
   }
@@ -154,12 +164,12 @@ export class AdaptiveConformal {
    * @param {number[]} levels quantile levels in (0,1)
    * @returns {{q: number, v: number}[]}
    */
-  quantiles(pointForecast, levels) {
+  quantiles(pointForecast, levels, scale = 1) {
     const adapted = 1 - this.alpha;
 
     return levels.map((q) => {
       const twoSided = warpCoverage(Math.abs(2 * q - 1), this.targetCoverage, adapted);
-      const halfWidth = this.errorQuantile(twoSided);
+      const halfWidth = this.errorQuantile(twoSided) * (scale > 0 ? scale : 1);
       const v = q >= 0.5 ? pointForecast + halfWidth : pointForecast - halfWidth;
       return { q, v: clamp(v, 0, this.capacityMw) };
     });
