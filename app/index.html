@@ -1,0 +1,163 @@
+<!doctype html>
+<html lang="en-AU">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>GridSense — weather against the Australian grid</title>
+<link rel="stylesheet" href="./css/app.css">
+</head>
+<body>
+<div class="app">
+
+  <header class="masthead">
+    <h1>GridSense</h1>
+    <p class="strap">What each power station should be producing right now, given the weather — and whether that confidence is earned.</p>
+    <div class="clock">
+      <span><span id="clock-nem">--:--</span> <span class="zone">NEM · AEST</span></span>
+      <span><span id="clock-wem">--:--</span> <span class="zone">WEM · AWST</span></span>
+    </div>
+  </header>
+
+  <nav class="views" aria-label="Views">
+    <button type="button" role="tab" aria-selected="true" data-view="aggregate">Aggregate</button>
+    <button type="button" role="tab" aria-selected="false" data-view="station">Station detail</button>
+    <button type="button" role="tab" aria-selected="false" data-view="training">Training monitor</button>
+  </nav>
+
+  <main>
+
+    <!-- ── Aggregate ─────────────────────────────────────────────────── -->
+    <section id="view-aggregate" class="grid" data-view-panel>
+
+      <div class="panel col-4">
+        <header><h2>Skill against persistence</h2></header>
+        <div class="skill-headline">
+          <div class="skill-value" id="skill-value">—</div>
+          <div>
+            <div class="skill-caption" id="skill-caption">Waiting for the first scored interval.</div>
+            <div class="chart" id="skill-spark" style="height:44px"></div>
+          </div>
+        </div>
+        <div class="tick-rule" style="margin:var(--s3) 0"></div>
+        <table id="skill-by-horizon">
+          <thead><tr><th>Horizon</th><th>Skill</th><th>CRPS</th><th>Cover 90</th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+
+      <div class="panel col-8">
+        <header>
+          <h2>Whole of market — actual against forecast</h2>
+          <span class="note" id="conviction-note"></span>
+        </header>
+        <div class="chart" id="conviction-band" style="height:300px"></div>
+        <div class="chart" id="expert-ribbon" style="height:74px"></div>
+      </div>
+
+      <div class="panel col-8">
+        <header><h2>Fuel mix, actual</h2><span class="note" id="fuelmix-note"></span></header>
+        <div class="chart" id="fuel-mix" style="height:230px"></div>
+      </div>
+
+      <div class="panel col-4">
+        <header><h2>Regions</h2></header>
+        <div class="chart-scroll">
+          <table id="region-table">
+            <thead><tr><th>Region</th><th>Actual</th><th>Forecast</th><th>Skill</th></tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="panel col-12">
+        <header><h2>Data quality</h2><span class="note" id="quality-note"></span></header>
+        <dl class="quality" id="quality-strip"></dl>
+      </div>
+
+    </section>
+
+    <!-- ── Station detail ────────────────────────────────────────────── -->
+    <section id="view-station" class="grid" data-view-panel hidden>
+
+      <div class="panel col-12">
+        <header>
+          <h2>Station</h2>
+          <label class="note" for="station-select">
+            <select id="station-select"></select>
+          </label>
+          <span class="note" id="station-meta"></span>
+        </header>
+        <div class="chart" id="station-series" style="height:300px"></div>
+        <div class="chart" id="station-ribbon" style="height:74px"></div>
+      </div>
+
+      <div class="panel col-6">
+        <header><h2>Fitted power curve</h2><span class="note" id="curve-note"></span></header>
+        <div class="chart" id="power-curve" style="height:280px"></div>
+      </div>
+
+      <div class="panel col-6">
+        <header><h2>Weather lag</h2><span class="note">peak lag annotated</span></header>
+        <div class="chart" id="lag-heatmap" style="height:280px"></div>
+      </div>
+
+      <div class="panel col-4">
+        <header><h2>PIT histogram</h2></header>
+        <div class="chart" id="pit-histogram" style="height:200px"></div>
+      </div>
+
+      <div class="panel col-4">
+        <header><h2>Reliability</h2></header>
+        <div class="chart" id="reliability" style="height:200px"></div>
+      </div>
+
+      <div class="panel col-4">
+        <header><h2>Closest analogue</h2></header>
+        <div id="analogue-panel" class="state-msg">
+          <strong>No analogue yet</strong>
+          The analogue expert needs a few days of history before it can match today against it.
+        </div>
+      </div>
+
+    </section>
+
+    <!-- ── Training monitor ──────────────────────────────────────────── -->
+    <section id="view-training" class="grid" data-view-panel hidden>
+
+      <div class="panel col-12">
+        <header><h2>Replay</h2><span class="note" id="replay-note"></span></header>
+        <div id="replay-transport"></div>
+      </div>
+
+      <div class="panel col-8">
+        <header><h2>Rolling CRPS by expert</h2><span class="note">combined against its members</span></header>
+        <div class="chart" id="expert-crps" style="height:250px"></div>
+      </div>
+
+      <div class="panel col-4">
+        <header><h2>Coverage against target</h2></header>
+        <div class="chart" id="coverage-chart" style="height:250px"></div>
+      </div>
+
+      <div class="panel col-12">
+        <header><h2>Skill by station and horizon</h2><span class="note">sortable — also a leaderboard of which stations are predictable</span></header>
+        <div class="chart-scroll">
+          <table id="skill-matrix"><thead></thead><tbody></tbody></table>
+        </div>
+      </div>
+
+    </section>
+
+  </main>
+
+  <footer>
+    <span class="disclaimer">Forecasts are experimental and are not AEMO forecasts.</span>
+    <span>Dispatch data © AEMO, published for information only.</span>
+    <span>Station coordinates © Open Electricity, CC BY-NC 4.0.</span>
+    <span>Weather © Open-Meteo, CC BY 4.0.</span>
+  </footer>
+
+</div>
+<script type="module" src="./js/main.js"></script>
+</body>
+</html>
