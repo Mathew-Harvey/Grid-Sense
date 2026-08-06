@@ -152,3 +152,55 @@ through the harvester anyway for one schema and one cache, not because CORS
 requires it.
 
 **Status:** assumption confirmed. No decision needed.
+
+---
+
+## F6 — Tailem Bend 2's solar farm is curtailed in every interval it produces
+
+`TB2HYB` (Tailem Bend 2 Hybrid, 155 MW) is the one modelled station with no
+weather-modellable data at all. It is a semi-scheduled solar farm (`TB2SF1`)
+co-located with a bidirectional battery (`TB2B1`).
+
+Measured over 2026-08-03, 288 intervals:
+
+| | intervals |
+|---|---|
+| `TB2SF1` under semi-dispatch cap | 122 |
+| `TB2SF1` producing (`UIGF > 1`) | 117 |
+| **capped *and* producing** | **117** |
+
+Every interval in which the farm produces is curtailed. Masking curtailment —
+which is correct and required — therefore removes 100% of its productive
+intervals and leaves only night, so the target is constant at zero and every
+correlation returns exactly 0.000.
+
+That figure reads as "no relationship" when it means "no admissible data", so
+`correlateStation` now sets `target_constant` and the station view reports the
+distinction rather than showing a wall of zeroes.
+
+**Status:** correctly handled, no code defect. Flagged because it is a real
+finding about this station rather than about this build, and because a 100%
+curtailed producing record is worth Mat's attention — it is either a genuine
+network constraint at that connection point or something worth querying.
+
+---
+
+## F7 — Coal, hydro and gas correlate negatively with temperature, and that is demand, not weather
+
+Median Spearman against `temperature_2m` over 30 days:
+
+| Fueltech | Median Spearman | Stations |
+|---|---|---|
+| coal_black | **−0.369** | 7 |
+| coal_brown | **−0.210** | 2 |
+| hydro | **−0.217** | 2 |
+
+The relationship is real but it is not weather driving generation. This is an
+Australian winter: cold days raise demand, demand raises thermal dispatch, so
+output rises as temperature falls. Read carelessly this looks like a usable
+weather signal worth modelling, and it is not — it is a demand signal that would
+invert with the season.
+
+Thermal stations are therefore recorded and excluded from the forecast-skill
+exit condition, exactly as intended. No action needed; noted so the negative
+numbers are not later mistaken for a modelling opportunity.

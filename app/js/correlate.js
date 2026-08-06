@@ -194,10 +194,21 @@ export function laggedCrossCorrelation(weather, output, maxLagSteps = DEFAULT_MA
   }
 
   const prominence = Number.isFinite(peak) && Number.isFinite(lo) ? peak - lo : 0;
+
+  // An argmax sitting on the edge of the search window is not a peak, it is the
+  // correlation still climbing when the window ran out. Thermal stations do this
+  // constantly: their output tracks demand, demand tracks the season, and the
+  // profile drifts monotonically across the whole six hours to land on exactly
+  // +/-360 minutes. Reporting that as a travel time would be nonsense — no
+  // weather signal reaches a turbine six hours later — so an edge result is
+  // reported as no peak.
+  const onEdge = Math.abs(peakLag) === maxLagSteps;
+  const identifiable = prominence >= PEAK_MIN_PROMINENCE && !onEdge;
+
   return {
     lags,
     values,
-    peakLag: prominence >= PEAK_MIN_PROMINENCE ? peakLag : null,
+    peakLag: identifiable ? peakLag : null,
     prominence,
   };
 }
@@ -777,6 +788,13 @@ export function correlateStation(observations, weather, fueltech) {
     capped_fraction: 0,
     variables: {},
     curve: null,
+    // Set when masking leaves a target with no variation at all. Tailem Bend 2's
+    // solar farm sits under a semi-dispatch cap in every single interval it
+    // produces in, so removing curtailed intervals correctly leaves nothing but
+    // night, and every correlation comes back 0.000. That is not "no
+    // relationship", it is "no admissible data", and the two must not read the
+    // same on a chart.
+    target_constant: false,
   };
   if (obs.length === 0) return bundle;
 
@@ -801,6 +819,15 @@ export function correlateStation(observations, weather, fueltech) {
     const i = Math.round((o.observed_at - t0) / MS_PER_STEP);
     if (i >= 0 && i < steps && Number.isFinite(o[target])) output[i] = o[target];
   }
+
+  let seenValue = null;
+  for (let i = 0; i < steps; i++) {
+    const v = output[i];
+    if (!Number.isFinite(v)) continue;
+    if (seenValue === null) seenValue = v;
+    else if (v !== seenValue) { bundle.target_constant = false; seenValue = NaN; break; }
+  }
+  bundle.target_constant = seenValue !== null && !Number.isNaN(seenValue);
 
   if (!weather || weather.length === 0) return bundle;
   const variables = Object.keys(weather[0])
