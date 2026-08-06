@@ -20,11 +20,97 @@ each with the reason.
 | 4 | §15.4 station count | **60 stations by capacity** | Spec's stated ceiling; revisited against Loop E. |
 | 5 | §3.1 `idb` dependency | **Dropped** | The raw IndexedDB API is tolerable behind one small `store.js` wrapper; spec explicitly permits dropping it. Keeps runtime deps at three. |
 
+## Backfill source: `Next_Day_Dispatch` alone
+
+The 90-day backfill reads **only** `Next_Day_Dispatch`, not the `Dispatch_SCADA`
+archive. Its `UNIT_SOLUTION` table carries `INITIALMW`, `TOTALCLEARED`,
+`AVAILABILITY`, `UIGF` and `SEMIDISPATCHCAP` together at 5-minute resolution, so
+one 8 MB file per day replaces a daily archive of 288 nested zips — 90 fetches
+instead of 25,920 extractions.
+
+This rests on `INITIALMW` being the same measurement as `SCADAVALUE`, which was
+verified rather than assumed: for the interval stamped 2026-08-04 12:00, across
+the 479 DUIDs present in both sources, mean `|INITIALMW − SCADAVALUE|` was
+**0.0000 MW** and the maximum difference was **0.00 MW**. They are the same
+number, which also independently confirms that both are start-of-interval
+snapshots for a row stamped `T`.
+
+`Dispatch_SCADA` remains the live 5-minute source, since it is the only
+unit-level feed published in real time.
+
 ## Deviations from SHOULD
 
 | Spec | Deviation | Justification |
 |---|---|---|
 | §5.1 poll every 60s | Poll every 60s for `Dispatch_SCADA`; `Next_Day_Dispatch` polled hourly between 03:00–06:00 NEM | Next-day files land once daily ~04:10; polling them every 60s is pure waste. |
+
+## Design plan
+
+Written before any CSS, and checked against the brief afterwards.
+
+**Subject.** The Australian electricity grid at 5-minute dispatch resolution: a
+physical machine spanning 5,000 km, seen only through telemetry. **Audience:**
+one technically literate person who wants to know whether the forecast holds up.
+**The page's single job:** make the quality of a forecast visible.
+
+**Thesis.** The page is an instrument, not a report. The most characteristic
+thing in this subject's world is the dispatch interval — everything in the NEM
+is quantised to a hard five-minute tick, and the interval-ending timestamp
+convention is the thing that trips up everyone who touches this data. So the
+tick is the structural device: section rules are tick-marked at interval
+boundaries rather than being plain hairlines, and a hard vertical "now" rule
+runs through every time-axis chart. The structure encodes the quantisation
+rather than decorating around it.
+
+**Colour: the palette is data, not decoration.** Every colour in the interface
+is a fueltech, a state, or neutral chrome. There is no decorative colour, and
+that constraint is what keeps it from reading as generated.
+
+| Role | Value | |
+|---|---|---|
+| surface | `#0D1317` | deep slate, cool cast — instrument glass |
+| raised | `#151E24` | panels |
+| rule | `#233038` | tick grid |
+| text-dim / text | `#8CA0AB` / `#E4ECF0` | chrome only |
+| coal_black | `#4A5259` | deep graphite |
+| coal_brown | `#8A6240` | warm umber |
+| gas_ccgt / gas_steam | `#C8873A` / `#A87434` | amber |
+| gas_ocgt / gas_recip | `#E0A24E` / `#D9954A` | lighter for peaking plant |
+| distillate | `#7A6656` | |
+| hydro | `#2E6F9E` | deep water blue |
+| wind | `#3FA89B` | teal |
+| solar_utility | `#E8C33A` | saturated yellow |
+| battery_discharging / _charging | `#5FBF6A` / `#2F7A3A` | one hue, split by value |
+| bioenergy | `#7A9B4F` | |
+| pumps | `#4A7A8C` | |
+
+States are the only other colours: predicted is a cool dashed `#B8C7D0`, actual
+is the fueltech at full strength, curtailed/masked is hatched at reduced value.
+
+**Avoiding the three defaults.** Not the cream/serif/terracotta look, and not
+the broadsheet. A dark control-room surface is the genuine vernacular of
+dispatch telemetry, but it deliberately is *not* the near-black-plus-one-acid-
+accent default: there is no single bright accent at all. There are fourteen
+fueltech hues, every one of them data-bearing, and the surface is a cool slate
+rather than near-black.
+
+**Redundant encoding.** Teal wind against green battery is not a safe
+distinction, so fueltech carries a second channel everywhere it appears: a
+distinct dash/hatch pattern in charts and a short code in legends and tables.
+No chart depends on hue alone.
+
+**Type.** Display is **Bricolage Grotesque** — characterful, with a width axis
+worth using on the headline skill score, and not a face that turns up by
+default. Data labels are **Barlow Semi Condensed**: a condensed grotesque that
+stays legible at small sizes and packs a dense station matrix. Two families,
+never interchanged. Every numeral in the interface is `tabular-nums`; the
+figures update every few seconds during replay and proportional digits would
+make the whole layout jitter.
+
+**Signature.** The **conviction band**: the prediction fan whose width *is* the
+model's live confidence, visibly breathing as the model learns, with the expert
+weights as a stacked ribbon directly beneath on the same time axis and the same
+"now" rule. All the boldness is spent there; everything else stays quiet.
 
 ## Corrections to the spec (detail in FLAGS.md)
 

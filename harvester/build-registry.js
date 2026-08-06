@@ -119,10 +119,20 @@ function currentRegistrations(rows, nowMs) {
   return best;
 }
 
+// AEMO and Open Electricity name the same plant differently often enough that a
+// literal comparison misses the largest units in Queensland. AEMO carries
+// registration artefacts ("CALLIDE C NETT OFF"), joins co-located plant into one
+// record ("Swanbank B Power Station & Swanbank E Gas Turbine"), and spells out
+// plant type where Open Electricity does not.
 const normaliseName = (s) =>
   String(s || '')
     .toUpperCase()
-    .replace(/\bPOWER STATION\b|\bWIND FARM\b|\bSOLAR FARM\b|\bPOWER\b|\bSTATION\b/g, '')
+    .split('&')[0]                       // joined records name the first plant first
+    .replace(/\bNETT?\s*OFF\b/g, '')     // a settlement arrangement, not part of the name
+    .replace(
+      /\bPOWER STATION\b|\bWIND FARM\b|\bSOLAR FARM\b|\bGAS TURBINE\b|\bCOGENERATION\b|\bPLANT\b|\bPOWER\b|\bSTATION\b|\bFARM\b/g,
+      '',
+    )
     .replace(/[^A-Z0-9]/g, '');
 
 export async function buildRegistry({ limit = 60, out = path.join(HERE, 'registry.json') } = {}) {
@@ -192,22 +202,35 @@ export async function buildRegistry({ limit = 60, out = path.join(HERE, 'registr
   const records = [];
 
   for (const s of stations.values()) {
+    // Open Electricity's station granularity does not always match AEMO's, so
+    // the station code is tried first, then the normalised name, then the
+    // station's own DUIDs — Open Electricity codes are frequently DUID-derived
+    // (CALL_B for CALL_B_1/CALL_B_2, SWAN_E for SWAN_E).
     const oe =
       oeByCode.get(String(s.station_id).toUpperCase()) ||
-      oeByName.get(normaliseName(s.station_name));
-
-    if (!oe) { unmatched.push(s); continue; }
+      oeByName.get(normaliseName(s.station_name)) ||
+      s.duids.map((d) => oeByCode.get(d.duid.toUpperCase())).find(Boolean) ||
+      s.duids
+        .map((d) => oeByCode.get(d.duid.toUpperCase().replace(/[_#-]?\d+$/, '')))
+        .find(Boolean);
 
     // Fueltech comes from the unit-level Open Electricity data; a station with
     // mixed units takes the fueltech carrying the most capacity.
     const byFt = new Map();
-    for (const u of oe.duid_data) {
+    for (const u of oe?.duid_data || []) {
       const mapped = FUELTECH[u.fuel_tech];
       if (!mapped) continue;
       byFt.set(mapped, (byFt.get(mapped) || 0) + (u.capacity_registered || 0));
     }
     const fueltech = [...byFt.entries()].sort((a, b) => b[1] - a[1])[0]?.[0];
-    if (!fueltech) { unmatched.push(s); continue; }
+
+    // A station with no coordinates is kept, not dropped. Regional totals are
+    // reconciled against AEMO's own published figures, and a station missing
+    // from that sum throws no error — it just makes the region quietly low
+    // while every number downstream continues to look plausible. Coordinates
+    // are needed only to fetch weather, so an unlocated station simply cannot
+    // be weather-modelled.
+    if (!oe || !fueltech) unmatched.push(s);
 
     // Batteries: the load side is a separate DUID at some stations and the same
     // DUID at others (HPR1 registers BIDIRECTIONAL; HVWWBA1G/HVWWBA1L split).
@@ -215,17 +238,18 @@ export async function buildRegistry({ limit = 60, out = path.join(HERE, 'registr
     // flagged where it cannot be determined from the registration alone.
     const hasLoad = s.duids.some((d) => d.dispatch_type === 'LOAD');
     const hasBidirectional = s.duids.some((d) => d.dispatch_type === 'BIDIRECTIONAL');
-    const isBattery = fueltech.startsWith('battery');
+    const isBattery = Boolean(fueltech?.startsWith('battery'));
 
     records.push({
       station_id: s.station_id,
       station_name: s.station_name,
       network: s.network,
       region: s.region,
-      fueltech,
-      lat: oe.lat,
-      lon: oe.lon,
-      capacity_mw: oe.capacity_registered,
+      fueltech: fueltech || null,
+      lat: oe?.lat ?? null,
+      lon: oe?.lon ?? null,
+      capacity_mw: oe?.capacity_registered ?? null,
+      located: Boolean(oe),
       unit_count: s.duids.filter((d) => d.dispatch_type !== 'LOAD').length,
       duids: s.duids,
       semi_scheduled: s.duids.some((d) => d.schedule_type === 'SEMI-SCHEDULED'),
@@ -237,7 +261,7 @@ export async function buildRegistry({ limit = 60, out = path.join(HERE, 'registr
       source: {
         duids: `AEMO MMSDM ${y}-${m} PARTICIPANT_REGISTRATION.DUDETAILSUMMARY`,
         name: `AEMO MMSDM ${y}-${m} PARTICIPANT_REGISTRATION.STATION`,
-        location: 'Open Electricity facilities GeoJSON (CC BY-NC 4.0)',
+        location: oe ? 'Open Electricity facilities GeoJSON (CC BY-NC 4.0)' : null,
         retrieved_at: retrieved,
       },
     });
@@ -264,6 +288,7 @@ export async function buildRegistry({ limit = 60, out = path.join(HERE, 'registr
       lat: oe.lat,
       lon: oe.lon,
       capacity_mw: oe.capacity_registered,
+      located: true,
       unit_count: oe.duid_data.length,
       duids: [],   // resolved against live facility codes at ingest
       semi_scheduled: fueltech === 'wind' || fueltech === 'solar_utility',
@@ -289,7 +314,7 @@ export async function buildRegistry({ limit = 60, out = path.join(HERE, 'registr
   // largest 60 stations outright yields just 13 renewables, and a dashboard
   // about weather-driven forecasting needs wind and solar, not another coal
   // unit whose output weather does not explain (§2.9).
-  const pick = (pred, n) => records.filter(pred).slice(0, n).map((s) => s.station_id);
+  const pick = (pred, n) => records.filter((s) => s.located && pred(s)).slice(0, n).map((s) => s.station_id);
   const isNem = (s) => s.network === 'NEM';
   const modelled = new Set([
     ...pick((s) => isNem(s) && s.fueltech === 'wind', Math.round(limit * 0.45)),
@@ -329,7 +354,10 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   for (const s of kept.filter((s) => s.modelled)) byFt[s.fueltech] = (byFt[s.fueltech] || 0) + 1;
   console.log('Modelled fueltech mix:', byFt);
   if (unmatched.length) {
-    console.log(`\n${unmatched.length} stations had no location match and were dropped:`);
+    console.log(
+      `\n${unmatched.length} stations have no coordinates: they count toward regional ` +
+      `totals but cannot be weather-modelled. First 20:`,
+    );
     for (const u of unmatched.slice(0, 20)) console.log(`  ${u.station_id}  ${u.station_name}`);
   }
 }

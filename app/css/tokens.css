@@ -1,0 +1,81 @@
+/* Design tokens.
+ *
+ * The governing constraint: every colour here is a fueltech, a state, or
+ * neutral chrome. There is no decorative colour anywhere in the interface. A
+ * value that does not encode something has no reason to exist.
+ *
+ * Fueltech hues follow the semi-standardised vocabulary the energy industry
+ * already reads fluently — coal graphite, gas amber, hydro blue, wind teal,
+ * solar yellow — so a reader who knows the domain needs no legend to parse the
+ * fuel mix at a glance.
+ */
+
+:root {
+  /* Surface. A cool slate rather than near-black: this is instrument glass, and
+   * near-black with one bright accent is the look every dark dashboard lands on
+   * by default. */
+  --surface: #0d1317;
+  --raised: #151e24;
+  --raised-2: #1c272e;
+  --rule: #233038;
+  --rule-strong: #35464f;
+
+  /* Chrome. Text carries no data, so it carries no hue. */
+  --text: #e4ecf0;
+  --text-dim: #8ca0ab;
+  --text-faint: #5d6f79;
+
+  /* Fueltech. */
+  --ft-coal_black: #4a5259;
+  --ft-coal_brown: #8a6240;
+  --ft-gas_ccgt: #c8873a;
+  --ft-gas_steam: #a87434;
+  --ft-gas_ocgt: #e0a24e;
+  --ft-gas_recip: #d9954a;
+  --ft-distillate: #7a6656;
+  --ft-hydro: #2e6f9e;
+  --ft-wind: #3fa89b;
+  --ft-solar_utility: #e8c33a;
+  --ft-battery_discharging: #5fbf6a;
+  --ft-battery_charging: #2f7a3a;
+  --ft-bioenergy: #7a9b4f;
+  --ft-pumps: #4a7a8c;
+
+  /* State. Not fueltech, not chrome: what a value IS rather than what fuel
+   * produced it. */
+  --state-predicted: #b8c7d0;
+  --state-band: #b8c7d033;
+  --state-band-ghost: #b8c7d014;
+  --state-curtailed: #d0563f;
+  --state-suspect: #b0526e;
+  --state-now: #e4ecf0;
+
+  /* Skill score sign. Positive beats persistence, negative is worse than doing
+   * nothing, and that distinction is the whole point of the number. */
+  --skill-pos: #4fb884;
+  --skill-neg: #d0563f;
+
+  --font-display: 'Bricolage Grotesque', ui-sans-serif, system-ui, sans-serif;
+  --font-data: 'Barlow Semi Condensed', ui-sans-serif, system-ui, sans-serif;
+
+  /* A 5-minute dispatch interval is the atom of this whole system, so the
+   * spacing scale is built on it rather than on an arbitrary 8px grid. */
+  --tick: 5px;
+  --s1: 5px;
+  --s2: 10px;
+  --s3: 15px;
+  --s4: 20px;
+  --s5: 30px;
+  --s6: 45px;
+  --s7: 70px;
+
+  --radius: 2px;
+}
+
+/* Numerals never shift width. The figures update every few seconds during
+ * replay, and proportional digits make the entire layout twitch — the single
+ * cheapest thing that separates an instrument from a toy. */
+* {
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: 'tnum' 1;
+}

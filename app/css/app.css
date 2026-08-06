@@ -1,0 +1,346 @@
+@import './tokens.css';
+@import '../fonts/fonts.css';
+
+/* Layout and chrome.
+ *
+ * The structural device throughout is the dispatch tick. Everything in this
+ * market is quantised to a five-minute interval, so section rules are tick-
+ * marked at interval boundaries rather than drawn as plain hairlines, and every
+ * time-axis chart shares one hard "now" rule. The structure encodes the
+ * quantisation rather than decorating around it.
+ */
+
+*, *::before, *::after { box-sizing: border-box; }
+
+html {
+  background: var(--surface);
+  color-scheme: dark;
+}
+
+body {
+  margin: 0;
+  background: var(--surface);
+  color: var(--text);
+  font-family: var(--font-data);
+  font-size: 14px;
+  line-height: 1.45;
+  -webkit-font-smoothing: antialiased;
+}
+
+h1, h2, h3, .display {
+  font-family: var(--font-display);
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  margin: 0;
+}
+
+/* ---- the tick rule ---------------------------------------------------- */
+
+.tick-rule {
+  height: 6px;
+  border-top: 1px solid var(--rule);
+  background-image: linear-gradient(90deg, var(--rule) 1px, transparent 1px);
+  background-size: var(--s5) 100%;
+  background-position: 0 0;
+  background-repeat: repeat-x;
+}
+
+/* ---- app frame -------------------------------------------------------- */
+
+.app {
+  display: grid;
+  grid-template-rows: auto auto 1fr auto;
+  min-height: 100vh;
+}
+
+.masthead {
+  display: flex;
+  align-items: baseline;
+  gap: var(--s4);
+  flex-wrap: wrap;
+  padding: var(--s4) var(--s5) var(--s3);
+  border-bottom: 1px solid var(--rule);
+}
+
+.masthead h1 {
+  font-size: 22px;
+  font-stretch: 88%;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+
+.masthead .strap {
+  color: var(--text-dim);
+  font-size: 13px;
+  max-width: 46ch;
+}
+
+.masthead .clock {
+  margin-left: auto;
+  color: var(--text-dim);
+  font-size: 13px;
+  display: flex;
+  gap: var(--s3);
+  align-items: baseline;
+}
+
+.clock .zone {
+  color: var(--text-faint);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+/* ---- view tabs -------------------------------------------------------- */
+
+.views {
+  display: flex;
+  gap: 0;
+  border-bottom: 1px solid var(--rule);
+  padding: 0 var(--s5);
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.views::-webkit-scrollbar { display: none; }
+
+.views button {
+  appearance: none;
+  background: none;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  color: var(--text-dim);
+  font-family: var(--font-data);
+  font-size: 13px;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  padding: var(--s3) var(--s3);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.views button[aria-selected='true'] {
+  color: var(--text);
+  border-bottom-color: var(--text);
+}
+
+.views button:hover { color: var(--text); }
+
+/* Focus must be visible without being announced as a feature. */
+:focus-visible {
+  outline: 2px solid var(--state-predicted);
+  outline-offset: 2px;
+}
+
+/* ---- panels ----------------------------------------------------------- */
+
+main { padding: var(--s4) var(--s5) var(--s6); }
+
+.panel {
+  background: var(--raised);
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+  padding: var(--s4);
+  min-width: 0;
+}
+
+.panel > header {
+  display: flex;
+  align-items: baseline;
+  gap: var(--s3);
+  margin-bottom: var(--s3);
+}
+
+.panel h2 {
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+}
+
+.panel .note {
+  color: var(--text-faint);
+  font-size: 12px;
+  margin-left: auto;
+}
+
+.grid {
+  display: grid;
+  gap: var(--s3);
+  grid-template-columns: repeat(12, minmax(0, 1fr));
+}
+
+.col-12 { grid-column: span 12; }
+.col-8 { grid-column: span 8; }
+.col-6 { grid-column: span 6; }
+.col-4 { grid-column: span 4; }
+.col-3 { grid-column: span 3; }
+
+/* ---- the headline skill score ----------------------------------------- */
+
+.skill-headline {
+  display: flex;
+  align-items: baseline;
+  gap: var(--s4);
+  flex-wrap: wrap;
+}
+
+.skill-value {
+  font-family: var(--font-display);
+  font-size: clamp(44px, 9vw, 96px);
+  font-weight: 700;
+  font-stretch: 78%;
+  line-height: 0.9;
+  letter-spacing: -0.04em;
+}
+
+.skill-value.pos { color: var(--skill-pos); }
+.skill-value.neg { color: var(--skill-neg); }
+
+.skill-caption {
+  color: var(--text-dim);
+  font-size: 13px;
+  max-width: 34ch;
+}
+
+/* ---- charts ----------------------------------------------------------- */
+
+.chart {
+  width: 100%;
+  position: relative;
+}
+
+.chart-scroll {
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+
+/* ---- data quality strip ------------------------------------------------ */
+
+.quality {
+  display: flex;
+  gap: var(--s5);
+  flex-wrap: wrap;
+  font-size: 12px;
+}
+
+.quality dt {
+  color: var(--text-faint);
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  font-size: 10px;
+}
+
+.quality dd {
+  margin: 0;
+  font-size: 15px;
+  color: var(--text);
+}
+
+.quality dd.warn { color: var(--state-curtailed); }
+
+/* ---- tables ------------------------------------------------------------ */
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+th {
+  text-align: right;
+  font-weight: 600;
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+  padding: var(--s1) var(--s2);
+  border-bottom: 1px solid var(--rule);
+  white-space: nowrap;
+}
+
+th:first-child, td:first-child { text-align: left; }
+
+td {
+  text-align: right;
+  padding: var(--s1) var(--s2);
+  border-bottom: 1px solid var(--rule);
+  white-space: nowrap;
+}
+
+tbody tr:hover { background: var(--raised-2); }
+
+/* Fueltech never relies on hue alone: a short code sits beside every swatch, so
+ * teal wind against green battery is legible without colour. */
+.ft {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.ft-swatch {
+  width: 9px;
+  height: 9px;
+  border-radius: 1px;
+  flex: none;
+}
+
+.ft-code {
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  color: var(--text-faint);
+}
+
+/* ---- empty and error states -------------------------------------------- */
+/* Written as direction, never as apology. */
+
+.state-msg {
+  color: var(--text-dim);
+  font-size: 13px;
+  padding: var(--s5) 0;
+  max-width: 52ch;
+}
+
+.state-msg strong {
+  color: var(--text);
+  font-weight: 600;
+  display: block;
+  margin-bottom: var(--s1);
+}
+
+/* ---- footer ------------------------------------------------------------ */
+
+footer {
+  border-top: 1px solid var(--rule);
+  padding: var(--s4) var(--s5);
+  color: var(--text-faint);
+  font-size: 11px;
+  display: flex;
+  gap: var(--s4);
+  flex-wrap: wrap;
+}
+
+footer .disclaimer { color: var(--text-dim); }
+
+/* ---- responsive -------------------------------------------------------- */
+
+@media (max-width: 1100px) {
+  .col-8, .col-6 { grid-column: span 12; }
+  .col-4, .col-3 { grid-column: span 6; }
+}
+
+@media (max-width: 640px) {
+  main { padding: var(--s3) var(--s3) var(--s6); }
+  .masthead { padding: var(--s3); gap: var(--s2); }
+  .views { padding: 0 var(--s3); }
+  .col-4, .col-3 { grid-column: span 12; }
+  .quality { gap: var(--s3); }
+  /* A wide matrix scrolls inside its own panel rather than making the page
+   * scroll sideways. */
+  .panel { padding: var(--s3); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
+}
