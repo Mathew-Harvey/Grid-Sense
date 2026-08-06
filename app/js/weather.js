@@ -73,14 +73,18 @@ export const VARIABLES_BY_FUELTECH = {
   pumps: [],
 };
 
-// Radiation is reported as the mean over the hour PRECEDING the stamp — the
-// same interval-ending convention AEMO uses — while temperature, wind, pressure
-// and cloud are instantaneous at the stamp. Checked against Sydney either side
-// of the June solstice: taken as instantaneous, peak irradiance lands half an
-// hour after solar noon and there is still 37 W/m^2 an hour after sunset. Taken
-// as a preceding-hour mean and attributed to the middle of that hour, both fall
-// into place. Ignoring this puts a systematic half-hour lag into every solar
-// model, in the direction that looks plausible.
+// Radiation comes back as the mean over the hour PRECEDING its stamp — the same
+// interval-ending convention AEMO uses — while temperature, wind, pressure and
+// cloud are instantaneous at the stamp. A radiation sample therefore belongs in
+// the middle of the hour behind its stamp, not at it.
+//
+// Measured rather than assumed. Over a week of reanalysis at a Queensland solar
+// farm, reading the stamps as instantaneous tilts the clear-sky index by 0.36
+// between morning and afternoon and leaves no day looking clear; attributing
+// each sample to its mid-hour drops the tilt to 0.04 and four consecutive clear
+// days come out flat at 0.98 to 1.00. A full hour is worse again. Skip this and
+// every solar model inherits a half-hour lag, in the direction that still looks
+// entirely plausible.
 const HOUR_MEAN_VARIABLES = new Set([
   'shortwave_radiation', 'direct_normal_irradiance', 'diffuse_radiation',
 ]);
