@@ -1,0 +1,18 @@
+{
+  "name": "gridsense",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Weather-driven forecasts for Australian power stations, scored honestly against a baseline.",
+  "engines": { "node": ">=22" },
+  "scripts": {
+    "test": "node --test \"test/**/*.test.js\"",
+    "harvest": "node harvester/serve.js",
+    "backfill": "node harvester/backfill.js",
+    "serve": "node harvester/serve.js"
+  },
+  "dependencies": {
+    "fflate": "^0.8.2",
+    "uplot": "^1.6.31"
+  }
+}
