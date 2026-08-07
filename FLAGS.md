@@ -120,17 +120,32 @@ holds a single trading day (`SCADA_2026-08-05.json`, 08:00–07:55 AWST,
 288 intervals, 76 facilities).
 
 There is therefore no 90-day WEM backfill available from this source, so the
-replay-training centrepiece is **NEM-only**. WEM is ingested live and gets the
-correlation and live-forecast views, but cannot participate in the 90-day
-replay.
+replay-training centrepiece is **NEM-only**.
 
 Taken under **§15.3**, which explicitly permits this: "A working NEM-only
 dashboard beats a half-working national one." Recorded rather than silently
 shipped smaller, per §15.
 
-**Status:** accepted limitation, surfaced in the UI. No decision needed unless
-Mat wants WEM history sourced elsewhere (the MMSDM-equivalent WEM archive would
-need separate investigation).
+**Correction, made after a reader asked "where is WA?".** This entry used to
+claim "WEM is ingested live and gets the correlation and live-forecast views."
+That is not true of the shipped app and should not have been written in the
+present tense: `harvester/fetch-wem.js` exists and works, but nothing schedules
+it, no WEM data reaches the browser, and there is no live mode at all — the
+dashboard trains on the window the harvester built at deploy time. The app is
+NEM-only, without qualification.
+
+The reader's question also exposed the gap that produced it: the region table
+listed five NEM regions with no word about why two states were missing, and
+the masthead has always carried a WEM clock, which invites exactly the
+expectation the data never meets. The plain-English caption and glossary now
+state that Western Australia and the Northern Territory run separate grids and
+are not part of this market. The clock is left in place — it is orientation for
+an Australian reader, not a claim of coverage — but it is the remaining thing
+on the page that hints at WEM.
+
+**Status:** accepted limitation, now stated in the interface rather than only in
+this file. Sourcing WEM history elsewhere (a WEM equivalent of the MMSDM
+archive) remains uninvestigated.
 
 ---
 

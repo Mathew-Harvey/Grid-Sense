@@ -8,7 +8,7 @@
 // glossary; story templates carry {placeholders} the app fills at render time.
 
 export const DECK = {
-  "strap": "Watch a forecast model learn 21 days of Australia's power grid at high speed — and mark its own homework as it goes.",
+  "strap": "Watch a forecast model learn 21 days of Australia's eastern power grid at high speed — and mark its own homework as it goes.",
   "tabs": {
     "aggregate": "Whole market",
     "station": "One station",
@@ -29,7 +29,7 @@ export const DECK = {
     },
     "regions": {
       "plainTitle": "State by state",
-      "caption": "One row per [[region|region]] of Australia's eastern electricity market — roughly one per state. Each shows how many [[gw|gigawatts]] its tracked stations are making at this point in the [[replay|replay]], and its share of the total — a scoreboard of who's carrying the load."
+      "caption": "One row per [[region|region]] of the National Electricity Market, which covers the eastern and southern states. Western Australia and the Northern Territory are absent because they are not connected to it — separate grids, separate markets. Each row is how many [[gw|gigawatts]] that region's tracked stations are making right now in the [[replay|replay]], and its share of the total."
     },
     "quality": {
       "plainTitle": "Where the data ends",
@@ -155,7 +155,7 @@ export const DECK = {
     },
     "region": {
       "name": "Region",
-      "plain": "One of five zones in the eastern electricity market, roughly one per state: New South Wales, Queensland, South Australia, Tasmania and Victoria."
+      "plain": "One of the five zones of the National Electricity Market: New South Wales (which includes the ACT), Queensland, South Australia, Tasmania and Victoria. Western Australia and the Northern Territory are too far away to connect, so they run their own grids and are not part of this market."
     },
     "price": {
       "name": "Wholesale price",
