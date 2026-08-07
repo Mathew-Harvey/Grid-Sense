@@ -7,6 +7,7 @@
 
 import { uPlot, COLOURS, fueltechColour, FUELTECH_CODE, baseOpts, autoResize } from '../charts/base.js';
 import { getStationDay, unpackDay } from '../store.js';
+import { registerHowTo, repositionHowTo } from '../explain.js';
 
 const fmt = (v, d = 1) => (Number.isFinite(v) ? v.toFixed(d) : '—');
 const pct = (v) => (Number.isFinite(v) ? `${(v * 100).toFixed(1)}%` : '—');
@@ -149,6 +150,59 @@ export function mount(root, ctx) {
   curveMsgEl.hidden = true;
   curveHost.append(curveChartEl, curveMsgEl);
 
+  // What the reading guide points at: the last wind fit drawn, kept here
+  // because the chart module itself only ever sees pixels.
+  let curveContext = null;
+
+  registerHowTo('powercurve', curveChartEl, () => {
+    const u = optional.curve?.plot;
+    const cc = curveContext;
+    if (!u || !cc || curveChartEl.hidden) return null;
+
+    const over = u.over.getBoundingClientRect();
+    const box = curveChartEl.getBoundingClientRect();
+    const ox = over.left - box.left;
+    const oy = over.top - box.top;
+    const px = (xv, yv) => ({ x: ox + u.valToPos(xv, 'x'), y: oy + u.valToPos(yv, 'y') });
+
+    const items = [];
+    if (cc.scatter) {
+      // Median of the uncapped cloud, so the dot lands where the dots are.
+      const xs = [];
+      for (let i = 0; i < cc.scatter.x.length; i++) if (!cc.scatter.capped[i]) xs.push(cc.scatter.x[i]);
+      xs.sort((a, b) => a - b);
+      const mid = xs[Math.floor(xs.length / 2)];
+      if (Number.isFinite(mid) && cc.curve) {
+        items.push({
+          ...px(mid, 0.25 * cc.capacity),
+          text: 'Each grey dot is five real minutes: how windy it was, and what came out.',
+        });
+      }
+      const firstCap = cc.scatter.capped.findIndex(Boolean);
+      if (firstCap >= 0) {
+        items.push({
+          ...px(cc.scatter.x[firstCap], cc.scatter.y[firstCap]),
+          text: 'A red cross: the wind was there, but the grid told this farm to hold back.',
+          align: 'right',
+        });
+      }
+    }
+    if (cc.curve?.converged) {
+      if (Number.isFinite(cc.curve.cutIn)) {
+        // High enough that the label's lower half clears the axis; the chart
+        // clips its own overflow.
+        items.push({ ...px(cc.curve.cutIn, 0.12 * cc.capacity), text: 'Too calm to turn.' });
+      }
+      if (Number.isFinite(cc.curve.rated) && Number.isFinite(cc.curve.ratedOutput)) {
+        items.push({
+          ...px(cc.curve.rated + 0.5, cc.curve.ratedOutput),
+          text: 'Full power — stronger wind adds nothing more.',
+        });
+      }
+    }
+    return items.length ? items : null;
+  });
+
   function curveMessage(html) {
     curveMsgEl.innerHTML = html;
     curveMsgEl.hidden = false;
@@ -203,7 +257,7 @@ export function mount(root, ctx) {
 
   select.addEventListener('change', () => {
     selected = select.value;
-    ctx.onStationChange?.(selected);
+    ctx.requestRender?.();
   });
 
   function fillOptions(stations) {
@@ -258,6 +312,8 @@ export function mount(root, ctx) {
           curve: fitted,
           capacityMw: row.capacity_mw,
         });
+        curveContext = { scatter, curve: fitted, capacity: row.capacity_mw };
+        repositionHowTo('powercurve');
       } else if (isSolar && corr?.curve?.converged) {
         el('curve-note').textContent = '';
         curveMessage('<strong>Solar fit</strong>' +

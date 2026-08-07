@@ -9,6 +9,7 @@
 // spinner for four minutes has failed even if it eventually renders.
 
 import { loadAll, cachedManifest } from './dataload.js';
+import { initExplain, updateStory } from './explain.js';
 import * as aggregateView from './views/aggregate.js';
 import * as stationView from './views/station.js';
 import * as trainingView from './views/training.js';
@@ -34,7 +35,11 @@ const ctx = {
   horizons: [],
   correlationById: new Map(),
   control,
-  onStationChange: null,
+  // Views call this after any interaction that changes what should be drawn.
+  // Renders are otherwise driven by worker messages, and once the replay has
+  // finished those stop arriving — without this, a dropdown change after the
+  // end of the replay sat undrawn until the page was reloaded.
+  requestRender: scheduleRender,
 };
 
 let worker = null;
@@ -90,6 +95,7 @@ function scheduleRender() {
     rafHandle = 0;
     const selected = document.querySelector('.views button[aria-selected="true"]')?.dataset.view ?? 'aggregate';
     mounted[selected]?.update(state);
+    updateStory(state, ctx);
   });
 }
 
@@ -226,6 +232,7 @@ async function boot() {
     button.addEventListener('click', () => showView(button.dataset.view));
   }
 
+  initExplain();
   remountViews();
 
   const cached = await cachedManifest().catch(() => null);

@@ -6,6 +6,8 @@
 // member — which is the entire claim the combiner makes, and the only place on
 // the page where that claim is falsifiable.
 
+import { FUELTECH_CODE } from '../charts/base.js';
+
 const fmt = (v, d = 3) => (Number.isFinite(v) ? v.toFixed(d) : '—');
 
 export function mount(root, ctx) {
@@ -62,6 +64,7 @@ export function mount(root, ctx) {
         const h = b.dataset.h;
         sortDir = sortKey === h ? -sortDir : -1;
         sortKey = h;
+        ctx.requestRender?.();
       }));
 
       const skillOf = (r, h) => r.horizons?.find((x) => x.horizon === h)?.skill;
@@ -73,7 +76,7 @@ export function mount(root, ctx) {
       });
 
       el('skill-matrix').querySelector('tbody').innerHTML = sorted.map((r) => `
-        <tr><td>${r.station_name}</td><td>${r.fueltech}</td><td>${Math.round(r.capacity_mw)}</td>` +
+        <tr><td>${r.station_name}</td><td>${FUELTECH_CODE[r.fueltech] ?? r.fueltech}</td><td>${Math.round(r.capacity_mw)}</td>` +
         horizons.map((h) => {
           const v = skillOf(r, h);
           return `<td class="${v > 0 ? 'pos' : v < 0 ? 'neg' : ''}">${fmt(v)}</td>`;

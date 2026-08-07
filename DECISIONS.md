@@ -124,3 +124,32 @@ weights as a stacked ribbon directly beneath on the same time axis and the same
 | F3 | `DispatchIS_Reports` carries `DISPATCHLOAD` every 5 min | It carries no unit-level table; UIGF/SEMIDISPATCHCAP are next-day only |
 | F8 | CRPS is the mean pinball loss *and* equals MAE for a point forecast | The two differ by a factor of two; CRPS is twice the pinball integral |
 | F9 | `alpha += gamma * (targetCoverage − hit)` | That sign is positive feedback and drives alpha to a clamp; the update is `alpha += gamma * (hit − targetCoverage)` |
+
+## The plain-English layer
+
+A later request: make every dashboard legible to someone who has never thought
+about the power industry, without dumbing the instrument down. The decisions,
+and their reasons:
+
+- **Two modes, not a rewrite.** Plain English is the default for a first
+  visit; Expert restores the original instrument exactly. One reader asked for
+  the page to teach; the reader it was originally built for asked for density.
+  A single compromise view would have served neither.
+- **The copy is data.** Every caption, glossary entry and story template lives
+  in `app/js/explain-deck.js` as one reviewable document, drafted from two
+  independent teaching angles, merged by a judge pass, then repaired by an
+  adversarial zero-knowledge read. `test/explain.test.js` holds it to its
+  rules: every panel captioned, every marked term backed by a glossary entry,
+  every story placeholder one the app fills.
+- **Terms explain themselves in place.** Domain words carry a dotted
+  underline; a tap opens a two-sentence popover. A separate glossary page
+  would put the explanation a navigation away from the confusion.
+- **"How to read this" labels the live chart, not a diagram of one.** The
+  overlay computes its positions from the chart's own coordinate transforms at
+  open time, so the labels point at the reader's actual data — the band that
+  is on screen now, this farm's real curtailed crosses — and ride along as the
+  replay scrolls.
+- **The story line states the replay's clock, not the wall clock.** "Replaying
+  7:30 am Sat 18 Jul…" keeps the one fact newcomers most reliably get wrong —
+  that this is recorded history, not live telemetry — in every sentence the
+  page says about itself.

@@ -26,9 +26,16 @@ forecasts see turbine-level telemetry this system does not.
 harvester/   Node data layer: fetch, parse, normalise, reconcile, backfill, serve
 app/         the dashboard: plain JS + uPlot, no framework, no build step
 data/        harvester output (gitignored, rebuilt by the backfill commands)
-test/        node:test suites — 168 tests
+test/        node:test suites — 179 tests
 tools/       screenshot harness for the visual iteration loop
 ```
+
+The dashboard opens in **Plain English** mode: every panel is retitled and
+captioned for a reader who has never thought about electricity markets, domain
+terms explain themselves on tap, a story line says what is happening in one
+sentence, and the two flagship charts carry a "How to read this" overlay that
+labels their live pixels. The **Expert** toggle in the masthead restores the
+original instrument, and the browser remembers the choice.
 
 Runtime dependencies: `fflate` and `uplot`. That is the whole list.
 

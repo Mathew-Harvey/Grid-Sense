@@ -8,6 +8,7 @@
 import { createConvictionBand, createExpertRibbon } from '../charts/conviction.js';
 import { fueltechColour, FUELTECH_CODE } from '../charts/base.js';
 import { intervalRevenue } from '../revenue.js';
+import { registerHowTo, repositionHowTo } from '../explain.js';
 
 const fmt = (v, d = 0) => (Number.isFinite(v) ? v.toFixed(d) : '—');
 const gw = (mw) => (Number.isFinite(mw) ? (mw / 1000).toFixed(2) : '—');
@@ -16,9 +17,12 @@ const gw = (mw) => (Number.isFinite(mw) ? (mw / 1000).toFixed(2) : '—');
  *  good in words rather than relying on the sign being understood. */
 function skillCaption(skill) {
   if (!Number.isFinite(skill)) return 'Waiting for the first scored interval.';
-  if (skill > 0) return `Beating a no-change forecast by ${(skill * 100).toFixed(0)}%. Above zero is better than assuming nothing changes.`;
-  if (skill === 0) return 'Level with a no-change forecast.';
-  return `Worse than assuming nothing changes, by ${(Math.abs(skill) * 100).toFixed(0)}%.`;
+  // "An hour ahead" is load-bearing: the table below can show the same model
+  // losing at 24 hours in the same breath, and a headline without its horizon
+  // reads as a fleet-wide verdict it never was.
+  if (skill > 0) return `Beating a no-change forecast by ${(skill * 100).toFixed(0)}% an hour ahead. Above zero is better than assuming nothing changes.`;
+  if (skill === 0) return 'Level with a no-change forecast an hour ahead.';
+  return `Worse than assuming nothing changes an hour ahead, by ${(Math.abs(skill) * 100).toFixed(0)}%.`;
 }
 
 export function mount(root, ctx) {
@@ -27,6 +31,58 @@ export function mount(root, ctx) {
 
   const band = createConvictionBand(el('conviction-band'), { getNowSec: nowSec });
   const ribbon = createExpertRibbon(el('expert-ribbon'), ctx.expertNames ?? [], { getNowSec: nowSec });
+
+  // Labels for the signature chart, pinned to the live pixels of the things
+  // they name. Data indices follow the conviction chart's series order:
+  // 0 time, 1 actual, 2 forecast, 3 hi90.
+  registerHowTo('market', el('conviction-band'), () => {
+    const u = band.plot;
+    const host = el('conviction-band');
+    const [t, actual, forecast, hi90] = u?.data ?? [];
+    if (!u || !t || t.length < 24) return null;
+
+    const over = u.over.getBoundingClientRect();
+    const box = host.getBoundingClientRect();
+    const ox = over.left - box.left;
+    const oy = over.top - box.top;
+    const px = (xv, yv) => ({ x: ox + u.valToPos(xv, 'x'), y: oy + u.valToPos(yv, 'y') });
+
+    const now = nowSec();
+    const lastFinite = (lane, before = Infinity) => {
+      for (let i = t.length - 1; i >= 0; i--) {
+        if (t[i] <= before && Number.isFinite(lane?.[i])) return i;
+      }
+      return -1;
+    };
+
+    const items = [];
+    const iActual = lastFinite(actual);
+    // Anchors staggered along the history so no two labels share a column:
+    // the line early, the band late, the now-rule at the top, the fan at the
+    // right edge.
+    const iMid = lastFinite(actual, t[Math.max(0, Math.floor(iActual * 0.15))]);
+    if (iMid >= 0) {
+      items.push({ ...px(t[iMid], actual[iMid]), text: 'The white line: what all these stations really produced.' });
+    }
+    // The band lane has gaps wherever no forecast came due, and it continues
+    // into the forward fan, so its label anchors to the newest band edge on
+    // the history side of now — clear of both the line's label at the left
+    // and the fan's at the right.
+    const [, , , , lo90] = u.data;
+    const iBand = Number.isFinite(now) ? lastFinite(lo90, now) : lastFinite(lo90);
+    if (iBand >= 0) {
+      items.push({ ...px(t[iBand], lo90[iBand]), text: 'The grey band: how sure the model was. It promises the truth lands inside 9 times in 10 — and Cover 90, to the left, scores that promise.', align: 'right' });
+    }
+    if (Number.isFinite(now) && iActual >= 0) {
+      const top = oy + 10;
+      items.push({ x: ox + u.valToPos(now, 'x'), y: top, text: 'The replay’s now — left is what happened, right is what the model expected next.' });
+    }
+    const iFan = lastFinite(forecast);
+    if (iFan >= 0 && Number.isFinite(now) && t[iFan] > now) {
+      items.push({ ...px(t[iFan], forecast[iFan]), text: 'The further ahead it looks, the wider its doubt.', align: 'right' });
+    }
+    return items.length ? items : null;
+  });
 
   // Charts owned by other modules load lazily: a missing one has to degrade to
   // an empty state, not take the page down with it.
@@ -84,6 +140,8 @@ export function mount(root, ctx) {
         hi80: pick(f.hi80, true), lo80: pick(f.lo80, true),
         ghostHi: pick(f.ghostHi, true), ghostLo: pick(f.ghostLo, true),
       });
+      // If the reading guide is open, its labels follow the chart as it scrolls.
+      repositionHowTo('market');
 
       // Weights exist only for scored history. The forward fan has no weights
       // yet — nothing has been scored at those instants — so indexing across the
@@ -116,9 +174,15 @@ export function mount(root, ctx) {
         const sk = s[`fleet.${h.label}.skill`];
         const cr = s[`fleet.${h.label}.crps`];
         const cv = s[`fleet.${h.label}.cov90`];
+        // Coverage is a promise with two ways to break: too few catches, or
+        // 100% from a band so wide it stopped saying anything. Both miss the
+        // ±3-point tolerance and both read red — without this, a 100% cell
+        // looks like a perfect score to exactly the reader it misleads.
+        const covOff = Number.isFinite(cv) && Math.abs(cv - 0.9) > 0.03;
         return `<tr><td>${h.label}</td>` +
           `<td class="${sk > 0 ? 'pos' : sk < 0 ? 'neg' : ''}">${fmt(sk, 3)}</td>` +
-          `<td>${fmt(cr, 1)}</td><td>${Number.isFinite(cv) ? (cv * 100).toFixed(1) + '%' : '—'}</td></tr>`;
+          `<td>${fmt(cr, 1)}</td>` +
+          `<td class="${covOff ? 'neg' : ''}">${Number.isFinite(cv) ? (cv * 100).toFixed(1) + '%' : '—'}</td></tr>`;
       }).join('');
 
       // The fuel lanes cover scored history only, the same span as the weights.

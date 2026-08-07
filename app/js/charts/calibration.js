@@ -92,6 +92,14 @@ export function classifyPitShape(counts) {
       caption: 'Flat — the stated uncertainty matches the realised uncertainty.',
     };
   }
+  // One edge bin holding most of the mass is its own diagnosis, and "sloped"
+  // understates it badly: nearly every outcome landed beyond one end of the
+  // predicted spread, which is the check failing outright.
+  if (Math.max(share[0], share[bins - 1]) > 0.5) {
+    return share[bins - 1] >= share[0]
+      ? { shape: 'pinned-high', caption: 'Piled at the top — the truth keeps landing above the whole band. The check is failing.' }
+      : { shape: 'pinned-low', caption: 'Piled at the bottom — the truth keeps landing below the whole band. The check is failing.' };
+  }
   if (Math.abs(slope) > curvature) {
     return slope > 0
       ? { shape: 'biased-low', caption: 'Sloped — outcomes sit above the middle of the band, so the forecast runs low.' }

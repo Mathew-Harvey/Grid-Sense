@@ -49,7 +49,7 @@ h1, h2, h3, .display {
 
 .app {
   display: grid;
-  grid-template-rows: auto auto 1fr auto;
+  grid-template-rows: auto auto auto 1fr auto;
   min-height: 100vh;
 }
 
@@ -413,3 +413,175 @@ td.neg, .skill-value.neg { color: var(--skill-neg); }
    scroll sideways while the diagnosis is still pending. */
 .chart { overflow: hidden; }
 .panel { overflow: hidden; }
+
+/* ---- the plain-English layer ------------------------------------------ */
+
+/* Two audiences, one instrument. Plain mode adds words around the charts;
+ * expert mode removes every one of them and restores the original labels.
+ * The switch is data-mode on the root element, so the whole layer toggles
+ * in CSS without a single view knowing about it. */
+
+.masthead-right {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: var(--s4);
+  flex-wrap: wrap;
+}
+
+.mode-toggle {
+  display: inline-flex;
+  border: 1px solid var(--rule);
+}
+
+.mode-toggle button {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  color: var(--text-dim);
+  font: inherit;
+  font-size: 12px;
+  padding: 4px 10px;
+  cursor: pointer;
+}
+
+.mode-toggle button[aria-pressed='true'] {
+  background: var(--raised);
+  color: var(--text);
+}
+
+.story {
+  margin: 0;
+  padding: var(--s2) var(--s4);
+  border-bottom: 1px solid var(--rule);
+  color: var(--text-dim);
+  font-size: 13px;
+  min-height: 1.4em;
+}
+
+.explain-caption {
+  margin: 0 0 var(--s2);
+  color: var(--text-dim);
+  font-size: 12.5px;
+  line-height: 1.5;
+  max-width: 68ch;
+}
+
+html[data-mode='expert'] .explain-caption { display: none; }
+html[data-mode='expert'] .howto { display: none; }
+
+/* A term reads as a word with a quiet dotted line under it, not as a button:
+ * the affordance is "this word will explain itself", nothing louder. */
+.term {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  padding: 0;
+  cursor: pointer;
+  border-bottom: 1px dotted var(--text-faint);
+}
+
+.term:hover { border-bottom-color: var(--text); }
+
+.term-pop {
+  position: fixed;
+  z-index: 40;
+  background: var(--raised);
+  border: 1px solid var(--rule);
+  padding: var(--s2) var(--s3);
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--text-dim);
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.5);
+}
+
+.term-pop strong {
+  display: block;
+  color: var(--text);
+  font-family: var(--font-display);
+  margin-bottom: 2px;
+}
+
+.howto {
+  appearance: none;
+  border: 1px solid var(--rule);
+  background: transparent;
+  color: var(--text-dim);
+  font: inherit;
+  font-size: 11px;
+  padding: 2px 8px;
+  margin-left: var(--s2);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.howto:hover, .howto[aria-pressed='true'] { color: var(--text); border-color: var(--text-dim); }
+
+/* Labels pinned to the chart's own pixels. The dot marks the thing being
+ * named; the text sits beside it and wraps. Tapping anywhere dismisses. */
+.chart { position: relative; }
+
+.callout-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 30;
+  cursor: pointer;
+}
+
+.callout {
+  position: absolute;
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  max-width: 190px;
+  transform: translateY(-50%);
+}
+
+.callout.right { transform: translateY(-50%); flex-direction: row-reverse; text-align: right; }
+.callout.above { transform: translate(-50%, -100%); flex-direction: column; align-items: center; text-align: center; }
+
+.callout-dot {
+  flex: none;
+  width: 7px;
+  height: 7px;
+  margin-top: 4px;
+  border-radius: 50%;
+  background: var(--text);
+  box-shadow: 0 0 0 3px rgba(228, 236, 240, 0.25);
+}
+
+.callout.above .callout-dot { margin-top: 0; }
+
+.callout-text {
+  background: rgba(13, 19, 23, 0.92);
+  border: 1px solid var(--rule);
+  padding: 3px 7px;
+  font-size: 11.5px;
+  line-height: 1.35;
+  color: var(--text);
+}
+
+@media (max-width: 700px) {
+  .masthead-right { margin-left: 0; }
+  .callout { max-width: 140px; }
+}
+
+.lane-label {
+  position: absolute;
+  top: 2px;
+  left: 8px;
+  z-index: 5;
+  font-size: 10px;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+  /* The expert ribbon fills its whole lane with light teal, so the label
+   * carries its own patch of surface to stay legible on any of the three. */
+  background: rgba(13, 19, 23, 0.75);
+  padding: 1px 5px;
+  pointer-events: none;
+}
+
+html[data-mode='expert'] .lane-label { display: none; }
