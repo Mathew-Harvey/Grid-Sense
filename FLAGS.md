@@ -340,8 +340,18 @@ far fewer independent outcomes than the short horizons do. The obvious next step
 is to re-run over the full 90 days rather than 20 and re-measure before changing
 any parameter.
 
-**Status:** open, with the next diagnostic identified. Recorded rather than
-tuned until the number looked acceptable.
+**Resolution of the diagnostic (90-day re-measure).** Running the identical
+configuration over the full 90 days — 25,920 intervals — moved 6h from 86.6% to
+**87.2%** on the 90% band and 77.7% to **78.4%** on the 80% band, both inside
+±3pp, confirming sample size as the cause there. 24h improved to 85.4% / 76.3%
+but remains outside: a day-ahead error series is correlated across hundreds of
+intervals, so 90 days holds only ~90 independent daily outcomes and the
+adaptation loop is still information-starved at that horizon. The same run
+strengthened the skill result to **100% of renewable stations positive at every
+horizon** (44 of 44), with solar at 24h reaching +0.268.
+
+**Status:** open for the 24h horizon only, cause understood (independent-sample
+starvation, not method), everything to 6h at nominal.
 
 ---
 

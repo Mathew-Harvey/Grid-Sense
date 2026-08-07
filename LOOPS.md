@@ -60,15 +60,22 @@ final 14 days.
 the PIT histogram passes a chi-squared uniformity test at p > 0.05.
 **Max passes:** 6.
 
-**Not reached — 3 of 5 horizons pass.** 5min, 30min and 1h sit within 0.2pp of
-nominal on both bands. 6h is 3.4pp short on the 90% band and 24h is 6.2pp short.
-Recorded in FLAGS F11 with the next diagnostic identified, rather than tuned
-until the number looked acceptable.
+**4 of 5 horizons pass at 90 days; 24h remains outside and is held open in
+FLAGS F11.** Re-measuring over the full 90-day backfill — the diagnostic F11
+named — brought 6h into tolerance without touching a parameter, which confirms
+the shortfall there was sample size, not method. 24h improved from 83.8% to
+85.4% on the 90% band but stays 4.6pp short: a day-ahead error series is
+correlated across hundreds of intervals, so even 90 days holds only ~90
+independent daily outcomes for the adaptation loop to learn from. Recorded
+rather than tuned until the number looked acceptable; one pass remains inside
+the loop's budget and it should be spent with more independent data or a
+horizon-aware adaptation, not another blind parameter nudge.
 
 Measured on renewables, median across stations.
 
 | Pass | 90% coverage by horizon (5min → 24h) | 80% coverage | Within ±3pp? | Change made |
 |---|---|---|---|---|
+| 4 | 90.0 / 90.0 / 89.9 / **87.2** / 85.4 | 80.0 / 80.0 / 80.0 / **78.4** / 76.3 | **5min–6h yes**; 24h no (4.6pp / 3.7pp) | No parameter changed — re-measured over 90 days instead of 20, as F11's diagnostic named. 6h moved from 3.4pp short to inside tolerance on both bands. The same run lifted Loop B to 100% of renewable stations positive at every horizon, with solar @24h at +0.268. |
 | 3 | **90.0 / 90.0 / 89.8** / 86.6 / 83.8 | **80.0 / 80.1 / 80.0** / 77.7 / 75.3 | 5min, 30min and 1h **yes**; 6h marginal at 3.4pp; **24h no** | `update()` was recomputing the interval from the current alpha instead of scoring the band that was actually issued. At a six-hour horizon that band was made 72 intervals earlier and alpha had moved under it, so the feedback chased its own tail. Scoring the issued band brought 1h from 88.7 to 89.8 and 30min to exactly nominal. |
 | 2 | 90.0 / 87.9 / 86.1 / 77.0 / 80.2 | 80.2 / 78.4 / 76.5 / 68.1 / 70.7 | **worse** | Raised gamma to 0.02 on the theory that the long horizons were still converging. Coverage at 6h fell from 84.5 to 77.0 — the loop overshoots rather than under-adapts. Reverted. |
 | 1b | 90.0 / 89.3 / 88.7 / 84.5 / 84.0 | 80.0 / 79.3 / 78.8 / 74.4 / 76.3 | short horizons yes | Carried over from the conditional-scale change in Loop B pass 3. |

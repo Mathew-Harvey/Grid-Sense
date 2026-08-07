@@ -26,7 +26,7 @@ forecasts see turbine-level telemetry this system does not.
 harvester/   Node data layer: fetch, parse, normalise, reconcile, backfill, serve
 app/         the dashboard: plain JS + uPlot, no framework, no build step
 data/        harvester output (gitignored, rebuilt by the backfill commands)
-test/        node:test suites — 166 tests
+test/        node:test suites — 168 tests
 tools/       screenshot harness for the visual iteration loop
 ```
 
@@ -99,10 +99,11 @@ three places the original specification contradicted the live data — is in
 `FLAGS.md`. Decisions and their reasons are in `DECISIONS.md`.
 
 Headline results from the 90-day walk-forward backtest: median renewable skill
-at the 1-hour horizon of about 0.30 against persistence, with 80%+ of wind and
-solar stations positive at every horizon, and conformal coverage at nominal
-(±0.2 pp) out to one hour. Regional generation totals reconcile with AEMO's
-published figures to within 3% across consecutive intervals.
+at the 1-hour horizon of 0.30 against persistence, all 44 wind and solar
+stations positive at every horizon, and conformal coverage within ±3 pp of
+nominal from five minutes out to six hours (the 24-hour band runs ~5 pp
+under-covered — see FLAGS F11). Regional generation totals reconcile with
+AEMO's published figures to within 3% across consecutive intervals.
 
 ## Licensing and attribution
 

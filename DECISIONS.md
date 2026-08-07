@@ -18,7 +18,7 @@ each with the reason.
 | 2 | §15.2 backfill depth | **90 days, NEM** | `Next_Day_Dispatch` current directory holds ~13 months of daily files, so 90 days is available without touching the monthly archive bundles. |
 | 3 | §15.3 WEM scope | **Post-reform only, live-only, no replay** | No WEM history exists to backfill (see FLAGS F4). |
 | 4 | §15.4 station count | **All 700 resolvable stations ingested; 60 modelled, chosen weather-first** (30 wind, 18 solar, the rest thermal/hydro) rather than capacity-first | Ingest is free — one SCADA file carries the whole fleet — and Loop F cannot reconcile against a partial fleet. Modelling is the expensive part, and top-60-by-capacity would have yielded just 13 renewables in a system about weather. |
-| 5 | §3.1 `idb` dependency | **Dropped** | The raw IndexedDB API is tolerable behind one small `store.js` wrapper; spec explicitly permits dropping it. Keeps runtime deps at three. |
+| 5 | §3.1 `idb` dependency | **Dropped** | The raw IndexedDB API is tolerable behind one small `store.js` wrapper; spec explicitly permits dropping it. Keeps runtime deps at two. |
 
 ## Backfill source: `Next_Day_Dispatch` alone
 
