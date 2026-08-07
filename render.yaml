@@ -11,16 +11,12 @@ services:
     name: gridsense
     runtime: node
     plan: standard
-    buildCommand: >-
-      npm install &&
-      node harvester/backfill.js --backfill 21 &&
-      node harvester/backfill-weather.js --days 90 &&
-      node harvester/backfill-price.js --days 21 &&
-      node harvester/correlate-run.js --days 21 &&
-      node harvester/build-wem-codes.js &&
-      node harvester/backfill-wem.js --days 21 &&
-      node harvester/backfill-flows.js --days 21 &&
-      node harvester/backtest.js --days 21
+    # The pipeline itself lives in package.json, not here. A service created by
+    # hand keeps whatever build command it was given and never re-reads this
+    # file, so naming the steps here means every new backfill stage has to be
+    # pasted into the dashboard by hand — and the stage that gets forgotten
+    # shows up as one panel silently 404ing. One indirection fixes that for good.
+    buildCommand: npm install && npm run build:data
     startCommand: node harvester/serve.js
     healthCheckPath: /
     envVars:

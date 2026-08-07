@@ -56,8 +56,14 @@ Node 22 or newer.
 
 ```bash
 npm install
+npm run build:data                              # the whole pipeline, ~15 min
+npm run serve                                   # http://localhost:8080
+```
 
-# One-off data build (order matters: dispatch before weather before correlate)
+`build:data` is these steps in this order — dispatch before weather before
+correlate — and can be run one at a time if you want to stop partway:
+
+```bash
 node harvester/backfill.js --backfill 21        # NEM dispatch, ~3 min
 node harvester/backfill-weather.js --days 90    # ERA5 weather, ~1 min, ~400 of Open-Meteo's 10k daily calls
 node harvester/backfill-price.js --days 21      # regional prices, ~3 min
@@ -65,14 +71,12 @@ node harvester/correlate-run.js --days 21       # fitted power curves + weather 
 node harvester/build-wem-codes.js               # join WA facilities to stations, ~10 s
 node harvester/backfill-wem.js --days 21        # Western Australian dispatch, ~10 s
 node harvester/backfill-flows.js --days 21      # regional demand + interconnector flow, ~1 min
-
-# Optional: the walk-forward backtest that fills the initial skill matrix.
-# The dashboard trains live in a worker either way; this just pre-computes.
-# About 3 minutes at 20 days.
-node harvester/backtest.js --days 20
-
-npm run serve                                   # http://localhost:8080
+node harvester/backtest.js --days 21            # walk-forward skill matrix, ~3 min
 ```
+
+Only the last one is optional: the dashboard trains live in a worker either
+way, and `backtest.js` just pre-computes the matrix so scores are there from
+first paint. Dropping it saves about three minutes and costs exactly that.
 
 Cold start in the browser takes about 10 seconds against a local harvester: the
 app loads the backfill into IndexedDB, then the replay trainer walks it forward
@@ -98,22 +102,26 @@ at the repo and it will pick it up, or create the service by hand.
 |---|---|
 | Service type | Web Service |
 | Runtime | Node |
-| Build command | `npm install && node harvester/backfill.js --backfill 21 && node harvester/backfill-weather.js --days 90 && node harvester/backfill-price.js --days 21 && node harvester/correlate-run.js --days 21 && node harvester/build-wem-codes.js && node harvester/backfill-wem.js --days 21 && node harvester/backfill-flows.js --days 21 && node harvester/backtest.js --days 21` |
+| Build command | `npm install && npm run build:data` |
 | Start command | `node harvester/serve.js` |
 | Health check path | `/` |
 | Instance | Starter is enough — see memory note |
 | Environment variable | `NODE_OPTIONS` = `--max-old-space-size=1536` |
 
-**If you created the service by hand, the build command must be updated when
-new backfill steps are added** — the blueprint is not consulted for a service
-that already exists. Western Australian dispatch and the map's demand and flow
-data each need their own step, and a stale build command shows up as those
-panels 404ing while everything else works.
+The build command deliberately names no pipeline steps. A service created by
+hand keeps the build command it was given and never re-reads `render.yaml`, so
+spelling the steps out in the dashboard means every stage added later has to be
+pasted in again — and the stage nobody remembers shows up as one panel quietly
+404ing while the rest of the dashboard looks fine. `npm run build:data` in
+`package.json` holds the real list, so the dashboard setting is correct once
+and stays correct.
 
-The server honours `PORT`, which Render sets automatically. The final
-`backtest.js` step pre-computes the skill matrix so the dashboard shows scores
-from first paint rather than after the replay warms up; dropping it saves
-about four minutes of build and costs exactly that.
+**If your service predates this and has the long build command stored, replace
+it with `npm install && npm run build:data` once.** Symptoms of the old one:
+no Western Australian row in the Regions table, and an empty Map tab, because
+`data/wem-dispatch/` and `data/flows/` were never built.
+
+The server honours `PORT`, which Render sets automatically.
 
 Three things worth knowing before the first deploy:
 
