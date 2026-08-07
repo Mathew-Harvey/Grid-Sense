@@ -732,3 +732,120 @@ html[data-mode='expert'] .lane-label { display: none; }
 }
 
 .map-legend { flex-wrap: wrap; max-width: min(400px, 44%); }
+
+/* ── Boot screen ───────────────────────────────────────────────────────────
+   Shown before anything else exists and removed once the replay is running.
+   Its job is to make a slow load legible rather than to disguise it: the load
+   is genuinely large — three weeks of five-minute dispatch for the whole
+   country — and a bare spinner would imply a server being slow rather than a
+   dataset arriving. */
+
+.boot {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: grid;
+  place-items: center;
+  padding: var(--s4);
+  background: var(--surface);
+  /* Removed by adding .boot-done, so the fade is a transition rather than a
+     rebuild — a display:none swap flashes the dashboard's unlaid-out first
+     frame straight into the reader's eye. */
+  opacity: 1;
+  transition: opacity 520ms ease;
+}
+
+.boot-done { opacity: 0; pointer-events: none; }
+
+.boot-inner {
+  width: min(560px, 100%);
+  text-align: center;
+}
+
+#boot-canvas {
+  display: block;
+  width: 100%;
+  height: auto;
+  max-height: 190px;
+  margin-bottom: var(--s2);
+}
+
+.boot-mark {
+  margin: 0;
+  font-size: clamp(2rem, 9vw, 3.1rem);
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  line-height: 1;
+  color: var(--text);
+}
+.boot-mark span { color: var(--state-predicted); }
+
+.boot-strap {
+  margin: var(--s2) 0 var(--s4);
+  color: var(--text-dim);
+  font-size: 0.95rem;
+}
+
+.boot-bar {
+  height: 4px;
+  border-radius: 2px;
+  background: var(--rule);
+  overflow: hidden;
+}
+
+.boot-fill {
+  height: 100%;
+  width: 0;
+  border-radius: 2px;
+  background: linear-gradient(90deg, var(--ft-wind), var(--state-predicted));
+  /* Long enough to read as motion, short enough that it never lags behind a
+     phase that has already finished and lies about where the load is. */
+  transition: width 380ms ease;
+}
+
+.boot-phase {
+  margin: var(--s2) 0 var(--s3);
+  font-size: 0.85rem;
+  color: var(--text);
+  min-height: 1.2em;
+  font-variant-numeric: tabular-nums;
+}
+
+.boot-steps {
+  list-style: none;
+  margin: 0 0 var(--s4);
+  padding: 0;
+  text-align: left;
+  display: grid;
+  gap: 6px;
+  font-size: 0.82rem;
+  color: var(--text-faint);
+}
+
+.boot-steps li {
+  display: grid;
+  grid-template-columns: 1.1em 1fr;
+  gap: var(--s2);
+  align-items: baseline;
+  transition: color 240ms ease;
+}
+
+/* The marker is content rather than a background image so a step's state is
+   readable to a screen reader as well as to an eye. */
+.boot-steps li::before { content: '·'; color: var(--text-faint); }
+.boot-steps li[data-state='active'] { color: var(--text); }
+.boot-steps li[data-state='active']::before { content: '▸'; color: var(--state-predicted); }
+.boot-steps li[data-state='done'] { color: var(--text-dim); }
+.boot-steps li[data-state='done']::before { content: '✓'; color: var(--ft-wind); }
+
+.boot-why {
+  margin: 0;
+  font-size: 0.78rem;
+  line-height: 1.5;
+  color: var(--text-faint);
+  text-wrap: pretty;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .boot, .boot-fill { transition: none; }
+}

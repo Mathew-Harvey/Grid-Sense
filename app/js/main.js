@@ -10,6 +10,7 @@
 
 import { loadAll, cachedManifest, DATA } from './dataload.js';
 import { createLiveFeed, describeLive } from './live.js';
+import { bootScreen } from './boot-screen.js';
 import { initExplain, updateStory } from './explain.js';
 import * as aggregateView from './views/aggregate.js';
 import * as stationView from './views/station.js';
@@ -117,6 +118,12 @@ function startWorker(loaded) {
     switch (m.type) {
       case 'building':
         setStatus(`Preparing ${m.label} (${m.done + 1} of ${m.total})`);
+        // The worker's build is the last stretch of the wait and the least
+        // visible: the fetching has stopped, so without this the bar would sit
+        // finished for several seconds while the page still showed nothing.
+        ctx.splash?.progress({
+          phase: 'train', label: `Fitting ${m.label}`, done: m.done + 1, total: m.total,
+        });
         break;
 
       case 'ready':
@@ -129,6 +136,7 @@ function startWorker(loaded) {
         // Reduced motion means the replay does not run itself. Someone who has
         // asked the system not to animate has not asked to be shown a static
         // screen either, so the transport is there and labelled.
+        ctx.splash?.done();
         if (!matchMedia('(prefers-reduced-motion: reduce)').matches) control('play');
         // Started here, not when the load message was posted. The worker spends
         // the better part of a minute reading the backfill out of IndexedDB,
@@ -172,15 +180,23 @@ function startWorker(loaded) {
 
       case 'empty':
         setStatus(m.message);
+        // 'ready' is not the only way out of the worker. Without this the boot
+        // screen would sit over a dashboard that had finished loading and was
+        // simply empty — a full-viewport overlay with nothing left to report.
+        ctx.splash?.done();
         break;
 
       case 'error':
         setStatus(`Replay stopped: ${m.message}`, true);
+        ctx.splash?.fail(`Replay stopped: ${m.message}`);
         break;
     }
   };
 
-  worker.onerror = (e) => setStatus(`Replay worker failed: ${e.message}`, true);
+  worker.onerror = (e) => {
+    setStatus(`Replay worker failed: ${e.message}`, true);
+    ctx.splash?.fail(`Replay worker failed: ${e.message}`);
+  };
 
   worker.postMessage({
     type: 'load',
@@ -307,19 +323,29 @@ async function boot() {
   initExplain();
   remountViews();
 
+  // Named for what it is rather than `boot`, which is the function this runs in.
+  const splash = bootScreen();
+
   const cached = await cachedManifest().catch(() => null);
   setStatus(cached
     ? `Reusing ${cached.stationCount} stations cached from a previous session.`
     : 'First run: fetching the backfill. This takes a couple of minutes.');
+  if (cached) {
+    splash.progress({ label: `Reusing ${cached.stationCount} stations held from a previous visit` });
+  }
 
   let loaded;
   try {
     loaded = await loadAll({
-      onProgress: ({ label, done, total }) =>
-        setStatus(total > 1 ? `${label} — ${done} of ${total}` : label),
+      onProgress: (p) => {
+        setStatus(p.total > 1 ? `${p.label} — ${p.done} of ${p.total}` : p.label);
+        splash.progress(p);
+      },
     });
   } catch (err) {
-    setStatus(`Could not load data: ${err.message}. Is the harvester running on port 8080?`, true);
+    const message = `Could not load data: ${err.message}. Is the harvester running on port 8080?`;
+    setStatus(message, true);
+    splash.fail(message);
     return;
   }
 
@@ -352,6 +378,7 @@ async function boot() {
   }
   scheduleRender();
 
+  ctx.splash = splash;
   startWorker(loaded);
 }
 

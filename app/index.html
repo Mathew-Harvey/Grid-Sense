@@ -20,6 +20,37 @@
 </script>
 </head>
 <body>
+
+<!-- The boot screen is markup, not JavaScript, and its colours are inline.
+     Everything else on this page waits for a module graph and then for
+     IndexedDB; on a phone that is several seconds of white before anything
+     appears at all. This paints on the first frame the browser has, which is
+     the only moment that matters for the feeling of the thing. -->
+<div id="boot" class="boot">
+  <div class="boot-inner">
+    <canvas id="boot-canvas" width="640" height="240" aria-hidden="true"></canvas>
+    <h1 class="boot-mark">Grid<span>Sense</span></h1>
+    <p class="boot-strap">Reading the weather against every power station in Australia.</p>
+
+    <div class="boot-bar"><div class="boot-fill" id="boot-fill"></div></div>
+    <p class="boot-phase" id="boot-phase">Starting up</p>
+
+    <ol class="boot-steps" id="boot-steps">
+      <li data-phase="registry">The station registry</li>
+      <li data-phase="dispatch">Three weeks of dispatch, every five minutes</li>
+      <li data-phase="weather">Weather at each station, plus the days ahead</li>
+      <li data-phase="prices">Prices, demand and flow</li>
+      <li data-phase="train">Training on it, in front of you</li>
+    </ol>
+
+    <p class="boot-why" id="boot-why">
+      This is not a spinner waiting on a server. The whole history is coming
+      into your browser and the model is fitted here, on your device — so every
+      number on screen can be traced back to a measurement you also hold.
+    </p>
+  </div>
+</div>
+
 <div class="app">
 
   <header class="masthead">
