@@ -1,0 +1,61 @@
+// The server's routing, tested against the routes the app actually asks for.
+//
+// This exists because of a failure that every other test suite was blind to.
+// The first cloud deploy built its data successfully — dispatch, weather,
+// prices, curves, backtest all written — and then served a dead page, because
+// the app's very first fetch is `/data/registry.json` and nothing in the build
+// produces that file. It had only ever worked on the machine where someone had
+// once made a symlink by hand. Unit tests over parsing and models cannot see a
+// gap like that; only asking the server for the URL can.
+
+import { test, after } from 'node:test';
+import assert from 'node:assert/strict';
+import { server } from '../harvester/serve.js';
+
+// Port 0: the OS picks a free one, so the suite cannot fail because a
+// development server happens to be running on the usual port.
+const listening = new Promise((resolve) => server.listen(0, resolve));
+after(() => server.close());
+
+async function get(pathname) {
+  await listening;
+  const { port } = server.address();
+  return fetch(`http://127.0.0.1:${port}${pathname}`);
+}
+
+test('the registry serves from /data even though no build step writes it there', async () => {
+  const res = await get('/data/registry.json');
+  assert.equal(res.status, 200, 'the app cannot start without this file');
+
+  const registry = await res.json();
+  assert.ok(Array.isArray(registry.stations) && registry.stations.length > 0,
+    'the registry must carry stations, not merely exist');
+  // The fields the loader filters on. A registry that parsed but had none of
+  // these would leave the dashboard empty with no error to show.
+  const modelled = registry.stations.filter((s) => s.modelled && s.located && s.capacity_mw > 0);
+  assert.ok(modelled.length > 0, 'no station survives the loader\'s filter');
+});
+
+test('the app shell serves at the root', async () => {
+  const res = await get('/');
+  assert.equal(res.status, 200);
+  assert.match(res.headers.get('content-type') ?? '', /text\/html/);
+});
+
+test('data routes carry the header that lets a static site on another origin read them', async () => {
+  const res = await get('/data/registry.json');
+  assert.equal(res.headers.get('access-control-allow-origin'), '*');
+});
+
+test('a missing data file is a 404 rather than a hang or a 500', async () => {
+  const res = await get('/data/nem-dispatch/1970-01-01.json');
+  assert.equal(res.status, 404);
+});
+
+test('an escape from the data root is refused', async () => {
+  // Encoded, because fetch normalises a literal ".." out of the path before it
+  // ever reaches the server — the guard has to hold against what arrives after
+  // decoding, not against what a well-behaved client would send.
+  const res = await get('/data/%2e%2e/harvester/serve.js');
+  assert.equal(res.status, 404);
+});

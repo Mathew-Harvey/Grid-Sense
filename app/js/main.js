@@ -134,7 +134,10 @@ function startWorker(loaded) {
       case 'handover':
         state.stationRows = m.rows;
         if (m.stats) state.stats = unpackStats(m.stats, statsLayout);
-        if (m.type === 'handover') setStatus('Replay has reached the present. Switching to live updates.');
+        // Not "switching to live updates": nothing polls. The window ends at
+        // the last day the harvester built, and it stays there until the
+        // harvester runs again and the page is reloaded.
+        if (m.type === 'handover') setStatus('Replay has reached the end of the loaded window.');
         scheduleRender();
         break;
 

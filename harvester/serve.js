@@ -36,6 +36,18 @@ const UPSTREAM = {
     'https://visualisations.aemo.com.au/aemo/apps/api/report/ELEC_NEM_SUMMARY',
 };
 
+// The registry is tracked source, not harvester output: `build-registry.js`
+// writes it into harvester/ and every harvester script reads it from there. The
+// browser asks for it under /data/ alongside everything the backfill produces,
+// so it is aliased here rather than copied. A copy would be a second source of
+// truth that a deploy can silently fail to make — which is exactly what
+// happened: the first cloud deploy served every backfilled file and 404ed on
+// this one, because the only thing that had ever put it in data/ was a symlink
+// made by hand on one developer's machine.
+const ALIASES = {
+  '/data/registry.json': path.join(HERE, 'registry.json'),
+};
+
 // Everything here is public read-only data, and the open header is what lets
 // the app be hosted as a static site on another origin — the browser will not
 // read /data across origins without it. GET and HEAD with no custom headers
@@ -59,9 +71,15 @@ async function serveFile(res, filePath) {
   }
 }
 
-const server = http.createServer(async (req, res) => {
+export const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, 'http://localhost');
   const pathname = decodeURIComponent(url.pathname);
+
+  // Ahead of the directory roots, so a stale file left in data/ by an older
+  // build cannot shadow the tracked one.
+  if (ALIASES[pathname]) {
+    if (await serveFile(res, ALIASES[pathname])) return;
+  }
 
   if (UPSTREAM[pathname]) {
     try {
@@ -96,9 +114,11 @@ const server = http.createServer(async (req, res) => {
   res.end(`Not found: ${pathname}\n`);
 });
 
-const port = Number(process.env.PORT) || 8080;
-server.listen(port, () => {
-  console.log(`GridSense on http://localhost:${port}`);
-  console.log(`  app   ${APP_DIR}`);
-  console.log(`  data  ${DATA_DIR}`);
-});
+if (import.meta.url === `file://${process.argv[1]}`) {
+  const port = Number(process.env.PORT) || 8080;
+  server.listen(port, () => {
+    console.log(`GridSense on http://localhost:${port}`);
+    console.log(`  app   ${APP_DIR}`);
+    console.log(`  data  ${DATA_DIR}`);
+  });
+}

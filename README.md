@@ -80,7 +80,7 @@ at the repo and it will pick it up, or create the service by hand.
 | Build command | `npm install && node harvester/backfill.js --backfill 21 && node harvester/backfill-weather.js --days 90 && node harvester/backfill-price.js --days 21 && node harvester/correlate-run.js --days 21 && node harvester/backtest.js --days 21` |
 | Start command | `node harvester/serve.js` |
 | Health check path | `/` |
-| Instance | **Standard (2 GB) or larger** — see memory note |
+| Instance | Starter is enough — see memory note |
 | Environment variable | `NODE_OPTIONS` = `--max-old-space-size=1536` |
 
 The server honours `PORT`, which Render sets automatically. The final
@@ -91,8 +91,12 @@ about four minutes of build and costs exactly that.
 Three things worth knowing before the first deploy:
 
 - **Memory.** The backfill parses AEMO daily files that decompress to ~120 MB
-  of text, so the build needs headroom well past the 512 MB free tier.
-  Standard (2 GB) builds cleanly with the `NODE_OPTIONS` value above.
+  of text, which is what the `NODE_OPTIONS` value above is for. Render runs
+  builds on their own infrastructure rather than the instance you pay for, so
+  this is not a reason to size up: a Starter instance (0.5 CPU, 512 MB) built
+  the full 21-day pipeline and serves it. The running server only reads one
+  file per request, so it is undemanding; the build is the expensive half and
+  it does not run on the instance.
 - **Ephemeral disk.** Render rebuilds `data/` on every deploy — that is by
   design here (fresh data each deploy, ~650 MB for 21 days). The build takes
   roughly 15 minutes, most of it fetching from NEMWeb.

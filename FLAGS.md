@@ -490,3 +490,53 @@ search or the smaller library, both still modelling-loop changes.
 unchanged. The main-thread exit condition of Loop E is met; the replay-speed
 element of the definition of done is not, and the shipped 21-day default window
 (a watchable ~11-minute background replay) is the honest accommodation.
+
+---
+
+## F14 — RESOLVED: the app's first fetch was served by a symlink that existed on one machine
+
+The first cloud deploy built every piece of data correctly — 21 days of
+dispatch, 90 days of weather, prices, fitted curves, the backtest — started the
+server, reported healthy, and served a dead page:
+
+```
+Could not load data: /data/registry.json returned 404.
+```
+
+`data/registry.json` is the app's very first fetch and the gate on everything
+after it: the station list, the DUID mapping, capacities, coordinates. No build
+step has ever written it. `build-registry.js` writes the registry to
+`harvester/registry.json`, where every harvester script reads it from, and the
+backfill scripts each write only their own outputs into `data/`.
+
+It worked in development because of this, made by hand in a terminal months
+into the build and never recorded anywhere:
+
+```
+data/registry.json -> ../harvester/registry.json
+```
+
+Every local run, every screenshot pass, every Loop D iteration and the entire
+Loop E performance measurement had been resolving that symlink. A fresh clone
+never had it.
+
+The failure is worth naming precisely, because "works locally" understates it:
+the development environment had a file the repository could not produce, so
+the thing being tested was never the thing that would ship. Nothing in the
+suite could see it — 168 tests over parsing, models, alignment and calibration,
+and not one of them asked the server for a URL.
+
+**Fix.** The registry is source, not output, so it is served from where it
+lives rather than copied into the output directory: `serve.js` aliases
+`/data/registry.json` to `harvester/registry.json`. A copy would have been a
+second source of truth that a deploy can forget to make, which is the bug
+again with more steps. The hand-made symlink was deleted so development
+resolves exactly what production does.
+
+`test/serve.test.js` now starts the server and asks it for the routes the app
+boots from, asserting the registry returns stations that survive the loader's
+filter. That test fails against the previous commit.
+
+**Status:** resolved. Root cause was an untracked local artefact masking a
+missing build output; the class of bug (no test ever issued an HTTP request)
+is closed by the new suite.
