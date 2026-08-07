@@ -14,131 +14,14 @@
 // model improves, and this model is being retrained in front of the reader.
 
 import { uPlot, COLOURS, baseOpts, autoResize } from './base.js';
-import { pitHistogram } from '../models/score.js';
+import {
+  pitHistogram, pitUniformity, pitBars, classifyPitShape,
+  reliabilityFromPit, reliabilityFromCounts,
+} from '../models/score.js';
 
-// Below this every histogram wobbles, and calling a 5% bump "overconfident"
-// trains the reader to ignore the caption.
-const FLAT_TOLERANCE = 0.15;
-
-/**
- * PIT counts as bars: bin centres against relative frequency, scaled so that a
- * perfectly calibrated forecast sits at exactly 1.
- *
- * Scaled that way because the reference line is then the same height whatever
- * the bin count and however many intervals have been scored, so the chart does
- * not change shape as the replay runs.
- *
- * @param {number[]} counts
- * @returns {{x: number[], y: number[], total: number}}
- */
-export function pitBars(counts) {
-  const bins = counts.length;
-  const total = counts.reduce((a, b) => a + b, 0);
-  const x = [];
-  const y = [];
-  for (let i = 0; i < bins; i++) {
-    x.push((i + 0.5) / bins);
-    y.push(total === 0 ? 0 : (counts[i] / total) * bins);
-  }
-  return { x, y, total };
-}
-
-/**
- * Which of the four shapes a PIT histogram has, and what that means.
- *
- * Slope is tested before curvature. A forecast that is simply biased high puts
- * most of its mass in the low bins, which lifts one tail and can read as half a
- * U; calling that overconfident would send the reader to widen a band when the
- * fault is in the centre of it.
- *
- * @param {number[]} counts
- * @returns {{shape: string, caption: string}}
- */
-export function classifyPitShape(counts) {
-  const bins = counts.length;
-  const total = counts.reduce((a, b) => a + b, 0);
-  if (total === 0) {
-    return { shape: 'empty', caption: 'No scored intervals yet.' };
-  }
-
-  const share = counts.map((c) => c / total);
-  const expected = 1 / bins;
-  const edge = Math.max(1, Math.round(bins * 0.2));
-
-  let tails = 0;
-  for (let i = 0; i < edge; i++) tails += share[i] + share[bins - 1 - i];
-  const tailExcess = tails / (2 * edge * expected) - 1;
-
-  const midFrom = Math.floor((bins - edge) / 2);
-  let centre = 0;
-  for (let i = midFrom; i < midFrom + edge; i++) centre += share[i];
-  const centreExcess = centre / (edge * expected) - 1;
-
-  // Mass either side of the middle, as a fraction of the whole: +1 would be
-  // every outcome in the top bin, -1 every outcome in the bottom one.
-  let slope = 0;
-  const mid = (bins - 1) / 2;
-  let arm = 0;
-  for (let i = 0; i < bins; i++) {
-    slope += share[i] * (i - mid);
-    arm += expected * Math.abs(i - mid);
-  }
-  slope /= arm;
-
-  const curvature = Math.max(Math.abs(tailExcess), Math.abs(centreExcess));
-  if (Math.max(curvature, Math.abs(slope)) < FLAT_TOLERANCE) {
-    return {
-      shape: 'calibrated',
-      caption: 'Flat — the stated uncertainty matches the realised uncertainty.',
-    };
-  }
-  // One edge bin holding most of the mass is its own diagnosis, and "sloped"
-  // understates it badly: nearly every outcome landed beyond one end of the
-  // predicted spread, which is the check failing outright.
-  if (Math.max(share[0], share[bins - 1]) > 0.5) {
-    return share[bins - 1] >= share[0]
-      ? { shape: 'pinned-high', caption: 'Piled at the top — the truth keeps landing above the whole band. The check is failing.' }
-      : { shape: 'pinned-low', caption: 'Piled at the bottom — the truth keeps landing below the whole band. The check is failing.' };
-  }
-  if (Math.abs(slope) > curvature) {
-    return slope > 0
-      ? { shape: 'biased-low', caption: 'Sloped — outcomes sit above the middle of the band, so the forecast runs low.' }
-      : { shape: 'biased-high', caption: 'Sloped — outcomes sit below the middle of the band, so the forecast runs high.' };
-  }
-  if (tailExcess > centreExcess) {
-    return {
-      shape: 'overconfident',
-      caption: 'U-shaped — outcomes keep landing in the tails, so the bands are too narrow.',
-    };
-  }
-  return {
-    shape: 'underconfident',
-    caption: 'Central hump — outcomes cluster mid-band, so the bands are wider than they need to be.',
-  };
-}
-
-/**
- * Empirical coverage of the central intervals a set of PIT values implies.
- *
- * Taken from the PIT rather than from the issued bands because it then covers
- * every level at once, including ones the model never issued a band for.
- *
- * @param {ArrayLike<number>} pitValues
- * @param {number[]} [levels] nominal central coverages in (0,1)
- * @returns {{nominal: number[], empirical: number[]}}
- */
-export function reliabilityFromPit(pitValues, levels = [0.5, 0.6, 0.7, 0.8, 0.9, 0.95]) {
-  const empirical = levels.map((c) => {
-    const lo = (1 - c) / 2;
-    const hi = (1 + c) / 2;
-    let inside = 0;
-    for (let i = 0; i < pitValues.length; i++) {
-      if (pitValues[i] >= lo && pitValues[i] <= hi) inside++;
-    }
-    return pitValues.length === 0 ? 0 : inside / pitValues.length;
-  });
-  return { nominal: levels.slice(), empirical };
-}
+// Re-exported so a caller that already has the chart module does not need a
+// second import for the statistics behind it.
+export { pitBars, classifyPitShape, reliabilityFromPit, reliabilityFromCounts };
 
 function captionPlugin(read) {
   return {
@@ -236,18 +119,36 @@ export function createPitHistogram(el, { bins = 10 } = {}) {
      *          caller can put the same verdict in the panel header
      */
     update(pitValues) {
-      if (pitValues.length === 0) {
+      if (pitValues.length === 0) return this.updateCounts([]);
+      return this.updateCounts(pitHistogram(pitValues, bins).counts);
+    },
+    /**
+     * The same chart from an already-binned histogram.
+     *
+     * The replay worker bins as it scores and ships ten numbers per frame
+     * rather than a hundred thousand, so this is the entry point it needs.
+     * Handing those counts to update() instead is silent and catastrophic:
+     * every count is well above 1, so re-binning them into [0,1] piles all ten
+     * into the top bar and the panel reports a confident, unchanging verdict
+     * about a distribution it never saw.
+     *
+     * @param {ArrayLike<number>} counts one per bin
+     */
+    updateCounts(counts) {
+      let total = 0;
+      for (let i = 0; i < counts.length; i++) total += counts[i];
+      if (total === 0) {
         caption = classifyPitShape([]).caption;
         plot.setData([[], []]);
+        top = 1.6;
         return { shape: 'empty', caption, pValue: NaN, n: 0 };
       }
-      const { counts, pValue } = pitHistogram(pitValues, bins);
       const bars = pitBars(counts);
       const verdict = classifyPitShape(counts);
       caption = verdict.caption;
       top = Math.max(1.6, Math.max(...bars.y) * 1.12);
       plot.setData([bars.x, bars.y]);
-      return { ...verdict, pValue, n: bars.total };
+      return { ...verdict, pValue: pitUniformity(counts).pValue, n: bars.total };
     },
     destroy() { stopResize(); plot.destroy(); },
   };

@@ -236,7 +236,7 @@ export function mount(root, ctx) {
   lazy('pit', '../charts/calibration.js', (m) => ({
     hist: m.createPitHistogram(el('pit-histogram')),
     rel: m.createReliabilityDiagram(el('reliability')),
-    reliabilityFromPit: m.reliabilityFromPit,
+    reliabilityFromCounts: m.reliabilityFromCounts,
   }), 'pit-histogram', 'Calibration');
 
   let selected = null;
@@ -333,21 +333,12 @@ export function mount(root, ctx) {
 
       if (corr?.variables) optional.lag?.update(corr.variables);
 
+      // The worker ships the histogram, not the values behind it — ten numbers
+      // a frame instead of a hundred thousand — so both panels read counts.
       if (state.frame?.pit) {
-        const counts = Array.from(state.frame.pit);
-        optional.pit?.hist.update(counts);
-        // The reliability diagram derives coverage from individual PIT values,
-        // and the worker only ships the histogram — a hundred thousand raw
-        // values per frame is exactly the payload the frame budget cannot
-        // afford. Expanding each bin back to its midpoint reconstructs the
-        // distribution at bin resolution, which is all the diagram plots anyway.
-        const values = [];
-        for (let b = 0; b < counts.length; b++) {
-          const mid = (b + 0.5) / counts.length;
-          for (let k = 0; k < counts[b]; k++) values.push(mid);
-        }
-        if (values.length && optional.pit?.reliabilityFromPit) {
-          optional.pit.rel.update(optional.pit.reliabilityFromPit(values));
+        optional.pit?.hist.updateCounts(state.frame.pit);
+        if (optional.pit?.reliabilityFromCounts) {
+          optional.pit.rel.update(optional.pit.reliabilityFromCounts(state.frame.pit));
         }
       }
 

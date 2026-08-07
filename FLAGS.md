@@ -555,3 +555,57 @@ filter. That test fails against the previous commit.
 **Status:** resolved. Root cause was an untracked local artefact masking a
 missing build output; the class of bug (no test ever issued an HTTP request)
 is closed by the new suite.
+
+---
+
+## F15 — The calibration panel was scoring its own histogram, and said so confidently
+
+Reported by a reader, in the best possible words: **"this never changes, is it
+broken."** It was.
+
+The PIT histogram drew a single bar in the top bin, at exactly ten times the
+uniform reference, for the entire replay. That reading — every outcome landing
+above the whole predicted spread — is flatly incompatible with the 88–91%
+interval coverage the same model reports on the same screen, which is what made
+it a bug rather than a finding.
+
+**Cause.** `createPitHistogram(...).update()` is documented to take raw PIT
+values, one per scored interval, and bins them itself. The replay worker cannot
+ship those — a hundred thousand values per frame to draw ten bars — so it bins
+as it scores and ships the ten counts. The station view handed those counts to
+`update()`. Every count is a whole number far above 1, so re-binning them into
+[0,1] clamped all ten into the top bin. No error, no NaN, no empty state: a
+confident, permanent, entirely fictional verdict, complete with an authoritative
+caption diagnosing a distribution the panel had never seen.
+
+The reliability diagram beside it was fed the same counts and did the *right*
+thing with them — expanding each bin back into that many midpoint values — but
+it allocated one array entry per scored interval, tens of thousands of them, on
+every animation frame.
+
+**Why no test caught it.** These are pure statistics, and they were living in
+`app/js/charts/calibration.js`, which imports uPlot from `/vendor/...` — a
+browser path that does not resolve in Node. Nothing in the suite could import
+the module at all, so `classifyPitShape`, `reliabilityFromPit` and the whole
+diagnostic had never been under test. The defect was not that a test was
+missing; it was that no test was *possible*.
+
+**Fix.** The statistics moved to `app/js/models/score.js`, where they have no
+chart dependency and the suite can reach them. The chart gained an explicit
+`updateCounts()` entry point for the binned case, `pitUniformity()` computes the
+chi-squared from counts, and `reliabilityFromCounts()` apportions each bin by
+overlap instead of expanding it. Four tests now hold the two entry points to
+agreeing on the same sample — including one that asserts the exact degenerate
+output the old path produced, so the failure mode stays documented.
+
+**What the panel actually shows now**, verified in the browser and against an
+offline probe over six days of real dispatch: roughly a third of outcomes in the
+lowest bin, a broadly flat middle, and a modest lift at the top. The low-bin
+spike is real and worth its own look — it is dominated by intervals where the
+plant and the forecast are both at zero, so the outcome sits at or below the
+lowest quantile, which all clamp to zero together. The verdict caption now moves
+as the replay runs, which is the whole point of it.
+
+**Status:** resolved. The untestable-by-construction class of defect is closed
+for this module; other chart modules still hold logic behind the same import and
+have not been audited.

@@ -441,3 +441,75 @@ test('coverage counts outcomes on the boundary as inside', () => {
   const intervals = [{ lo: 0, hi: 10 }, { lo: 0, hi: 10 }, { lo: 5, hi: 6 }, { lo: 0, hi: 1 }];
   assert.equal(coverage(intervals, [10, 0, 5.5, 2]), 0.75);
 });
+
+// ---------------------------------------------------------------------------
+// The counts path
+// ---------------------------------------------------------------------------
+
+// The replay worker bins PIT values as it scores and ships ten numbers a frame
+// rather than the hundred thousand values behind them. That means two entry
+// points into the same diagnostic, and for a year the station view fed counts
+// to the one that expects values. It never threw: every count is a whole number
+// above 1, so re-binning them into [0,1] dropped all ten into the top bar. The
+// panel drew a confident, unchanging verdict about a distribution it had never
+// seen — the failure a reader eventually reported as "this never changes".
+
+test('the counts path and the values path agree on the same sample', async () => {
+  const { pitHistogram, pitUniformity } = await import('../app/js/models/score.js');
+  const { reliabilityFromPit, reliabilityFromCounts } = await import('../app/js/models/score.js');
+
+  // A deliberately lumpy sample: uniform would make the two paths agree for
+  // the wrong reason.
+  const values = [];
+  for (let i = 0; i < 4000; i++) {
+    const u = ((i * 2654435761) % 1000) / 1000;
+    values.push(u < 0.3 ? u * 0.4 : u);
+  }
+
+  const { counts, pValue } = pitHistogram(values, 10);
+  assert.ok(Math.abs(pitUniformity(counts).pValue - pValue) < 1e-12,
+    'uniformity computed from counts must match the value-binned result');
+
+  const fromValues = reliabilityFromPit(values);
+  const fromCounts = reliabilityFromCounts(counts);
+  assert.deepEqual(fromCounts.nominal, fromValues.nominal);
+  for (let i = 0; i < fromValues.empirical.length; i++) {
+    // Bin resolution is the only difference: a central interval whose edge
+    // falls mid-bin is apportioned by overlap rather than known exactly.
+    assert.ok(Math.abs(fromCounts.empirical[i] - fromValues.empirical[i]) < 0.06,
+      `level ${fromValues.nominal[i]}: counts gave ${fromCounts.empirical[i].toFixed(3)}, ` +
+      `values gave ${fromValues.empirical[i].toFixed(3)}`);
+  }
+});
+
+test('binning an already-binned histogram is the degenerate result the counts path exists to avoid', async () => {
+  const { pitHistogram } = await import('../app/js/models/score.js');
+  // Any realistic histogram: every count far above 1.
+  const counts = [812, 402, 388, 401, 377, 390, 405, 398, 411, 616];
+  const wrong = pitHistogram(counts, 10).counts;
+  assert.equal(wrong[9], counts.length,
+    'every count lands in the top bin — silent, and indistinguishable from a real verdict');
+  assert.equal(wrong.slice(0, 9).reduce((a, b) => a + b, 0), 0);
+});
+
+test('reliability from counts is monotone and bounded', async () => {
+  const { reliabilityFromCounts } = await import('../app/js/models/score.js');
+  const { empirical } = reliabilityFromCounts([100, 100, 100, 100, 100, 100, 100, 100, 100, 100]);
+  for (let i = 1; i < empirical.length; i++) {
+    assert.ok(empirical[i] >= empirical[i - 1] - 1e-12, 'wider intervals cannot catch less');
+  }
+  for (const v of empirical) assert.ok(v >= 0 && v <= 1);
+  // A flat histogram is exactly calibrated, so empirical should track nominal.
+  const flat = reliabilityFromCounts(new Array(10).fill(500));
+  for (let i = 0; i < flat.nominal.length; i++) {
+    assert.ok(Math.abs(flat.empirical[i] - flat.nominal[i]) < 1e-9,
+      `flat histogram should give empirical = nominal at ${flat.nominal[i]}`);
+  }
+});
+
+test('an empty histogram is empty, not a division by zero', async () => {
+  const { pitUniformity } = await import('../app/js/models/score.js');
+  const { reliabilityFromCounts } = await import('../app/js/models/score.js');
+  assert.throws(() => pitUniformity(new Array(10).fill(0)), RangeError);
+  for (const v of reliabilityFromCounts(new Array(10).fill(0)).empirical) assert.equal(v, 0);
+});
