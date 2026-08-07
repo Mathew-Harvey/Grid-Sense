@@ -350,8 +350,20 @@ adaptation loop is still information-starved at that horizon. The same run
 strengthened the skill result to **100% of renewable stations positive at every
 horizon** (44 of 44), with solar at 24h reaching +0.268.
 
+**One further attempt (horizon-scaled error window).** The residual window at
+24h was widened from 2000 intervals (~7 days) to 7200 (~25 days), on the theory
+that a seven-day window keeps re-fitting the band to whichever synoptic regime
+just happened and pays for every transition. Measured over the same 90 days:
+the 90% band moved 85.4% → 85.8% and the 80% band 76.3% → 75.6% — a wash, well
+inside the run-to-run noise of a slid data window, with both bands still ~4pp
+short. Window size is not the binding constraint, which is consistent with the
+diagnosis above; the change was reverted rather than kept unearned.
+
 **Status:** open for the 24h horizon only, cause understood (independent-sample
-starvation, not method), everything to 6h at nominal.
+starvation, not method), everything to 6h at nominal. One parameter attempt
+measured and reverted; closing the gap likely needs a different band
+construction at day-ahead range (e.g. climatological quantiles blended in), and
+that is a modelling change for a measured loop, not a patch.
 
 ---
 
@@ -457,6 +469,24 @@ O(log n)) or a smaller per-horizon library. Both change model behaviour, so
 either belongs in a measured Loop B pass with before/after skill scores, not in
 a performance patch. Not attempted here for exactly that reason.
 
-**Status:** open, measured, cause identified, remedy scoped. The main-thread
-exit condition of Loop E is met; the replay-speed element of the definition of
-done is not.
+**Re-measure after the flat-layout rewrite.** The analogue library was rewritten
+from five thousand small objects to one flat `Float64Array` with a
+zero-allocation, branch-free scan — behaviour-identical, verified by a
+byte-identical 10-day backtest. The Node side moved: 2m00 → 1m39 over 10 days,
+with the larger share of that coming from restructuring the backtest's data
+preparation from a per-station scan of every interval bucket (quadratic in
+fleet size, 37% of the profile) to one sweep (2.7%). The browser side did not:
+sampled every ten seconds across a full 21-day replay at the maximum rate
+setting, the worker held **9–12 intervals/s at steady state** with the library
+at its 5,000-state cap — indistinguishable from the object-layout numbers in
+the table above. The whole replay completes in about 11 minutes.
+
+That null result sharpens the diagnosis: the cost is the volume of distance
+arithmetic itself, not pointer-chasing or allocation, so no layout change will
+close an order-of-magnitude gap. Only doing fewer evaluations can — the indexed
+search or the smaller library, both still modelling-loop changes.
+
+**Status:** open, re-measured, cause narrowed to arithmetic volume, remedy
+unchanged. The main-thread exit condition of Loop E is met; the replay-speed
+element of the definition of done is not, and the shipped 21-day default window
+(a watchable ~11-minute background replay) is the honest accommodation.

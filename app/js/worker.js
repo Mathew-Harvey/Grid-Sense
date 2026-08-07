@@ -258,6 +258,10 @@ async function build(message) {
       weather: rows.length ? toWeatherGrid(rows, t0, steps) : null,
       hasWeather: rows.length > 0,
       experts,
+      // Held by name because the analogue's whole justification is that its
+      // pick can be shown: "conditions most resemble 14 March 15:20".
+      analogueExpert: experts.find((e) => e.name === 'analogue') ?? null,
+      analogue: null,
       names,
       history: [],
       slots: HORIZONS.map(() => newSlot(names, meta.capacity_mw)),
@@ -448,6 +452,13 @@ function step(state) {
       const predictState = stateAt(track, i, steps);
       const predictions = track.experts.map((e) => e.predict(predictState, steps));
       if (predictions.some((p) => !Number.isFinite(p))) continue;
+
+      // The analogue's scratch state reflects the predict() that just ran, so
+      // the display horizon's neighbourhood has to be read here, before the
+      // next horizon's search overwrites it.
+      if (h === DISPLAY_HORIZON && track.analogueExpert) {
+        track.analogue = track.analogueExpert.bestMatch() ?? track.analogue;
+      }
 
       const byName = {};
       for (let e = 0; e < track.names.length; e++) byName[track.names[e]] = predictions[e];
@@ -739,6 +750,7 @@ function stationRows(state) {
     region: track.meta.region,
     capacity_mw: track.capacity,
     has_weather: track.hasWeather,
+    analogue: track.analogue,
     horizons: HORIZONS.map((hz, h) => {
       const slot = track.slots[h];
       if (slot.n === 0) return { horizon: hz.label, n: 0, skill: null };

@@ -2,3 +2,6 @@ node_modules/
 data/
 *.log
 app/node_modules
+# Copied in by the static-site build command; the served path maps to
+# node_modules when the harvester is the server.
+app/vendor/

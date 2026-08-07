@@ -493,18 +493,20 @@ const LIBRARY_SIZE = 5000;
  * breeze and the nocturnal jet. Current output is in there too, because what
  * the plant is already doing is part of the situation being matched.
  */
-function conditionsVector(state, h, cap) {
+const CONDITIONS_DIM = 6;
+
+/** Writes the conditions vector into out at offset, and allocates nothing:
+ *  this runs hundreds of times per dispatch interval. */
+function conditionsVectorInto(out, offset, state, h, cap) {
   const w = outlook(state, h);
   const angle = (todAt(state, h) * Math.PI) / 720;
   const last = state.history.at(-1);
-  return [
-    (Number.isFinite(w.wind_speed_100m) ? w.wind_speed_100m : 0) / 15,
-    Number.isFinite(w.clear_sky_index) ? w.clear_sky_index : 0,
-    ((Number.isFinite(w.temperature_2m) ? w.temperature_2m : 20) - 20) / 20,
-    Math.sin(angle),
-    Math.cos(angle),
-    (Number.isFinite(last) ? last : 0) / cap,
-  ];
+  out[offset] = (Number.isFinite(w.wind_speed_100m) ? w.wind_speed_100m : 0) / 15;
+  out[offset + 1] = Number.isFinite(w.clear_sky_index) ? w.clear_sky_index : 0;
+  out[offset + 2] = ((Number.isFinite(w.temperature_2m) ? w.temperature_2m : 20) - 20) / 20;
+  out[offset + 3] = Math.sin(angle);
+  out[offset + 4] = Math.cos(angle);
+  out[offset + 5] = (Number.isFinite(last) ? last : 0) / cap;
 }
 
 /**
@@ -518,14 +520,56 @@ function conditionsVector(state, h, cap) {
 export class Analogue {
   constructor() {
     this.name = 'analogue';
-    this.lib = [];
+    // One flat buffer instead of five thousand small objects. The scan is the
+    // hottest loop in the entire system — every station, every horizon, every
+    // interval — and pointer-chasing per record costs more than the arithmetic.
+    this.vecs = new Float64Array(LIBRARY_SIZE * CONDITIONS_DIM);
+    this.ys = new Float64Array(LIBRARY_SIZE);
+    this.ats = new Float64Array(LIBRARY_SIZE);
+    this.n = 0;
     this.next = 0;
-    this._matches = [];
+    this._q = new Float64Array(CONDITIONS_DIM);
+    this._bestD2 = new Float64Array(ANALOGUE_K);
+    this._bestIdx = new Int32Array(ANALOGUE_K);
+    this._bestCount = 0;
   }
 
-  /** The historical instants behind the most recent predict(), for the UI. */
+  /**
+   * The historical instants behind the most recent predict(), for the UI.
+   *
+   * Materialised on demand rather than during predict: the objects are only
+   * ever read for the one station a person is looking at, and building them
+   * for the whole fleet at every interval is pure allocation churn.
+   */
   matches() {
-    return this._matches;
+    const count = this._bestCount;
+    if (count === 0) return [];
+    const out = new Array(count);
+    let wsum = 0;
+    for (let i = 0; i < count; i++) {
+      const distance = Math.sqrt(this._bestD2[i]);
+      const weight = 1 / (distance + 1e-3);
+      wsum += weight;
+      const idx = this._bestIdx[i];
+      out[i] = { observed_at: this.ats[idx], distance, weight, output_mw: this.ys[idx] };
+    }
+    for (const m of out) m.weight /= wsum;
+    return out;
+  }
+
+  /**
+   * Just the nearest neighbour from the most recent predict(). Cheap enough to
+   * capture for the whole fleet every interval, where materialising the full
+   * neighbourhood is not.
+   */
+  bestMatch() {
+    if (this._bestCount === 0) return null;
+    const idx = this._bestIdx[0];
+    return {
+      observed_at: this.ats[idx],
+      output_mw: this.ys[idx],
+      distance: Math.sqrt(this._bestD2[0]),
+    };
   }
 
   predict(state, h) {
@@ -533,46 +577,53 @@ export class Analogue {
     // The last component of the conditions vector is output over nameplate; a
     // null nameplate makes the whole query NaN, every distance NaN, and the
     // weighted mean NaN, which clip() then serves as a confident zero.
-    if (cap === null || this.lib.length < ANALOGUE_K) {
-      this._matches = [];
+    if (cap === null || this.n < ANALOGUE_K) {
+      this._bestCount = 0;
       return clip(state.history.at(-1), state.capacity_mw);
     }
 
-    const q = conditionsVector(state, h, cap);
-    // Partial selection into a 25-slot list rather than sorting the library:
-    // this runs for every station at every horizon at every one of 25,920
-    // intervals in a 90-day replay.
-    const best = [];
+    conditionsVectorInto(this._q, 0, state, h, cap);
+    const q0 = this._q[0], q1 = this._q[1], q2 = this._q[2];
+    const q3 = this._q[3], q4 = this._q[4], q5 = this._q[5];
+    const vecs = this.vecs;
+    const bestD2 = this._bestD2;
+    const bestIdx = this._bestIdx;
+    let count = 0;
     let worst = Infinity;
-    for (const rec of this.lib) {
-      let d2 = 0;
-      for (let i = 0; i < q.length; i++) {
-        const d = q[i] - rec.vec[i];
-        d2 += d * d;
-        if (d2 >= worst) break;
-      }
+
+    // Full six-component distance with no per-component branch: at this
+    // dimension the early-exit test costs more than the multiplies it skips,
+    // and a branch-free body is what lets the JIT keep the loop tight.
+    for (let r = 0, o = 0; r < this.n; r++, o += CONDITIONS_DIM) {
+      const d0 = q0 - vecs[o];
+      const d1 = q1 - vecs[o + 1];
+      const d2c = q2 - vecs[o + 2];
+      const d3 = q3 - vecs[o + 3];
+      const d4 = q4 - vecs[o + 4];
+      const d5 = q5 - vecs[o + 5];
+      const d2 = d0 * d0 + d1 * d1 + d2c * d2c + d3 * d3 + d4 * d4 + d5 * d5;
       if (d2 >= worst) continue;
-      let pos = best.length;
-      while (pos > 0 && best[pos - 1].d2 > d2) pos--;
-      best.splice(pos, 0, { d2, rec });
-      if (best.length > ANALOGUE_K) best.pop();
-      if (best.length === ANALOGUE_K) worst = best[ANALOGUE_K - 1].d2;
+
+      let pos = count < ANALOGUE_K ? count : ANALOGUE_K - 1;
+      while (pos > 0 && bestD2[pos - 1] > d2) {
+        bestD2[pos] = bestD2[pos - 1];
+        bestIdx[pos] = bestIdx[pos - 1];
+        pos--;
+      }
+      bestD2[pos] = d2;
+      bestIdx[pos] = r;
+      if (count < ANALOGUE_K) count++;
+      if (count === ANALOGUE_K) worst = bestD2[ANALOGUE_K - 1];
     }
+    this._bestCount = count;
 
     let wsum = 0;
     let ysum = 0;
-    const matches = [];
-    for (const b of best) {
-      const distance = Math.sqrt(b.d2);
-      // The epsilon stops an exact repeat of a past state — common overnight,
-      // when everything is zero — from taking the entire weight.
-      const weight = 1 / (distance + 1e-3);
+    for (let i = 0; i < count; i++) {
+      const weight = 1 / (Math.sqrt(bestD2[i]) + 1e-3);
       wsum += weight;
-      ysum += weight * b.rec.y;
-      matches.push({ observed_at: b.rec.at, distance, weight, output_mw: b.rec.y });
+      ysum += weight * this.ys[bestIdx[i]];
     }
-    for (const m of matches) m.weight /= wsum;
-    this._matches = matches;
     return clip(ysum / wsum, cap);
   }
 
@@ -581,19 +632,19 @@ export class Analogue {
     // A NaN vector in the library is permanent: it never compares far enough
     // away to be rejected, so it wins a slot in every later neighbourhood.
     if (cap === null || !Number.isFinite(actual)) return;
-    const record = {
-      at: state.observed_at,
-      vec: conditionsVector(state, state.horizon_steps ?? 1, cap),
-      y: actual,
-    };
-    // Ring buffer: overwriting the oldest slot keeps the library bounded through
-    // a 90-day replay without shifting a 5000-element array every interval.
-    if (this.lib.length < LIBRARY_SIZE) {
-      this.lib.push(record);
+    const slot = this.n < LIBRARY_SIZE ? this.n : this.next;
+    conditionsVectorInto(this.vecs, slot * CONDITIONS_DIM, state, this.horizonForUpdate(state), cap);
+    this.ys[slot] = actual;
+    this.ats[slot] = state.observed_at;
+    if (this.n < LIBRARY_SIZE) {
+      this.n++;
     } else {
-      this.lib[this.next] = record;
       this.next = (this.next + 1) % LIBRARY_SIZE;
     }
+  }
+
+  horizonForUpdate(state) {
+    return state.horizon_steps ?? 1;
   }
 }
 

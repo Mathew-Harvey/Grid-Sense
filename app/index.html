@@ -9,6 +9,12 @@
      offset from the panel it belongs to. -->
 <link rel="stylesheet" href="/vendor/uplot/dist/uPlot.min.css">
 <link rel="stylesheet" href="./css/app.css">
+<script>
+  // A split deploy — this page as a static site, the harvester elsewhere —
+  // names the harvester's origin here, before any module loads. Left unset,
+  // the app reads /data from wherever it was served.
+  // window.GRIDSENSE_API_BASE = 'https://gridsense-api.onrender.com';
+</script>
 </head>
 <body>
 <div class="app">

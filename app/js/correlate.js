@@ -730,6 +730,54 @@ function chooseTarget(observations, fueltech) {
   return withUigf >= observations.length / 2 ? 'uigf_mw' : 'output_mw';
 }
 
+// How many scatter points survive into the bundle. Strided down to this many,
+// a 90-day wind station stays under ~50 kB of JSON while the cloud still reads
+// as density on the canvas rather than as individual points.
+const SCATTER_MAX_POINTS = 2000;
+
+/**
+ * The (speed, output, capped) cloud behind the fitted wind curve, downsampled
+ * for the chart.
+ *
+ * Uncapped points carry the value the fit saw. Capped points carry actual
+ * output — the gap between those and the curve *is* the curtailment the chart
+ * exists to show, and it only exists in the actual series; the available-energy
+ * figure would sit back on the curve as though nothing had happened.
+ *
+ * Strided rather than sampled at random so the result is deterministic and the
+ * daily cycle stays evenly represented.
+ */
+function windScatter(obs, speedGrid, targetGrid, t0) {
+  if (!speedGrid) return null;
+  const steps = targetGrid.length;
+  const points = [];
+  for (const o of obs) {
+    const i = Math.round((o.observed_at - t0) / MS_PER_STEP);
+    if (i < 0 || i >= steps) continue;
+    const v = speedGrid[i];
+    if (!Number.isFinite(v)) continue;
+    if (o.capped === true) {
+      if (Number.isFinite(o.output_mw)) points.push([v, o.output_mw, 1]);
+    } else if (Number.isFinite(targetGrid[i])) {
+      // targetGrid is only populated where the interval passed the mask, so
+      // this branch is exactly the set of points the fit was allowed to see.
+      points.push([v, targetGrid[i], 0]);
+    }
+  }
+  if (points.length === 0) return null;
+
+  const stride = Math.max(1, Math.ceil(points.length / SCATTER_MAX_POINTS));
+  const x = [];
+  const y = [];
+  const capped = [];
+  for (let i = 0; i < points.length; i += stride) {
+    x.push(Math.round(points[i][0] * 100) / 100);
+    y.push(Math.round(points[i][1] * 10) / 10);
+    capped.push(points[i][2]);
+  }
+  return { x, y, capped, n: points.length, stride };
+}
+
 /**
  * Weather onto the dispatch grid by linear interpolation between readings.
  *
@@ -804,6 +852,7 @@ export function correlateStation(observations, weather, fueltech) {
     capped_fraction: 0,
     variables: {},
     curve: null,
+    scatter: null,
     // Set when masking leaves a target with no variation at all. Tailem Bend 2's
     // solar farm sits under a semi-dispatch cap in every single interval it
     // produces in, so removing curtailed intervals correctly leaves nothing but
@@ -892,6 +941,7 @@ export function correlateStation(observations, weather, fueltech) {
       values.push(output[i]);
     }
     bundle.curve = fitWindCurve(speeds, values, capacity);
+    bundle.scatter = windScatter(obs, series.wind_speed_100m ?? null, output, t0);
   } else if (fueltech === 'solar_utility' && capacity > 0) {
     const csi = [];
     const ref = [];

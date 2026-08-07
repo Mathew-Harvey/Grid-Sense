@@ -64,42 +64,73 @@ const ETA = Math.sqrt((8 * Math.log(6)) / 5000) / LOSS_SPAN;
 // issued.
 const GAMMA = 0.005;
 
-/** Station-level series for one station, with the true instant of each value. */
-function toStationSeries(rowsByInterval, station) {
-  const registered = new Set(
-    station.duids.filter((d) => d.dispatch_type !== 'LOAD').map((d) => d.duid),
-  );
-  const active = new Set();
-  for (const [, rows] of rowsByInterval) {
-    for (const r of rows) if (registered.has(r.DUID)) active.add(r.DUID);
-  }
-  if (active.size === 0) return [];
-
-  const out = [];
-  for (const [settlementMs, rows] of rowsByInterval) {
-    let output = 0, uigf = 0, cleared = 0, seen = 0, anyUigf = false, capped = false;
-    for (const r of rows) {
-      if (!active.has(r.DUID)) continue;
-      seen++;
-      output += r.INITIALMW ?? 0;
-      cleared += r.TOTALCLEARED ?? 0;
-      if (r.UIGF !== null && r.UIGF !== undefined) { uigf += r.UIGF; anyUigf = true; }
-      if (r.SEMIDISPATCHCAP === 1) capped = true;
+/**
+ * Station-level series for every station at once, keyed by station_id.
+ *
+ * One sweep over the interval buckets, dispatching each row to its station's
+ * accumulator. Scanning every bucket once per station instead makes the prep
+ * quadratic in fleet size, and profiling showed that prep — not the models —
+ * dominating the whole backtest.
+ */
+function buildStationSeries(rowsByInterval, stations) {
+  const duidToAcc = new Map();
+  const accs = stations.map((station) => {
+    const acc = {
+      station,
+      active: new Set(),
+      out: [],
+      output: 0, uigf: 0, cleared: 0, seen: 0, anyUigf: false, capped: false,
+    };
+    for (const d of station.duids) {
+      if (d.dispatch_type !== 'LOAD') duidToAcc.set(d.duid, acc);
     }
-    if (seen === 0) continue;
-    const cap = station.capacity_mw ?? Infinity;
-    const suspect = Number.isFinite(cap) && output > 1.15 * cap;
-    out.push({
-      observed_at: observedAt(settlementMs, 'INITIALMW'),
-      output_mw: output,
-      uigf_mw: anyUigf ? uigf : null,
-      cleared_mw: cleared,
-      capped,
-      quality: suspect ? 'suspect' : seen < active.size ? 'partial' : 'ok',
-    });
+    return acc;
+  });
+
+  // A registered DUID that never reports would otherwise mark every interval
+  // 'partial', so completeness is judged against the DUIDs actually seen.
+  for (const [, rows] of rowsByInterval) {
+    for (const r of rows) {
+      const acc = duidToAcc.get(r.DUID);
+      if (acc) acc.active.add(r.DUID);
+    }
   }
-  out.sort((a, b) => a.observed_at - b.observed_at);
-  return out;
+
+  const touched = [];
+  for (const [settlementMs, rows] of rowsByInterval) {
+    for (const r of rows) {
+      const acc = duidToAcc.get(r.DUID);
+      if (!acc) continue;
+      if (acc.seen === 0) touched.push(acc);
+      acc.seen++;
+      acc.output += r.INITIALMW ?? 0;
+      acc.cleared += r.TOTALCLEARED ?? 0;
+      if (r.UIGF !== null && r.UIGF !== undefined) { acc.uigf += r.UIGF; acc.anyUigf = true; }
+      if (r.SEMIDISPATCHCAP === 1) acc.capped = true;
+    }
+    for (const acc of touched) {
+      const cap = acc.station.capacity_mw ?? Infinity;
+      const suspect = Number.isFinite(cap) && acc.output > 1.15 * cap;
+      acc.out.push({
+        observed_at: observedAt(settlementMs, 'INITIALMW'),
+        output_mw: acc.output,
+        uigf_mw: acc.anyUigf ? acc.uigf : null,
+        cleared_mw: acc.cleared,
+        capped: acc.capped,
+        quality: suspect ? 'suspect' : acc.seen < acc.active.size ? 'partial' : 'ok',
+      });
+      acc.output = 0; acc.uigf = 0; acc.cleared = 0; acc.seen = 0;
+      acc.anyUigf = false; acc.capped = false;
+    }
+    touched.length = 0;
+  }
+
+  const series = new Map();
+  for (const acc of accs) {
+    acc.out.sort((a, b) => a.observed_at - b.observed_at);
+    series.set(acc.station.station_id, acc.out);
+  }
+  return series;
 }
 
 /** Weather on the 5-minute grid, with derived features, keyed by grid index. */
@@ -342,9 +373,11 @@ export async function run({ days = 60, stations: only = null } = {}) {
   const ordered = [...byInterval.entries()].sort((a, b) => a[0] - b[0]);
   console.log(`Backtest over ${files.length} days, ${ordered.length} intervals, ${stations.length} stations\n`);
 
+  const seriesByStation = buildStationSeries(ordered, stations);
+
   const results = [];
   for (const station of stations) {
-    const series = toStationSeries(ordered, station);
+    const series = seriesByStation.get(station.station_id) ?? [];
     if (series.length < 2000) continue;
     const t0 = series[0].observed_at;
     const steps = Math.round((series.at(-1).observed_at - t0) / MS_PER_STEP) + 1;

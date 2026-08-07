@@ -36,10 +36,17 @@ const UPSTREAM = {
     'https://visualisations.aemo.com.au/aemo/apps/api/report/ELEC_NEM_SUMMARY',
 };
 
+// Everything here is public read-only data, and the open header is what lets
+// the app be hosted as a static site on another origin — the browser will not
+// read /data across origins without it. GET and HEAD with no custom headers
+// are CORS "simple requests", so no preflight route is needed.
+const CORS = { 'access-control-allow-origin': '*' };
+
 async function serveFile(res, filePath) {
   try {
     const body = await fs.readFile(filePath);
     res.writeHead(200, {
+      ...CORS,
       'content-type': TYPES[path.extname(filePath)] || 'application/octet-stream',
       // The app reloads constantly during development and stale JS is a
       // uniquely confusing failure, so nothing is cached.
@@ -60,12 +67,12 @@ const server = http.createServer(async (req, res) => {
     try {
       const upstream = await fetch(UPSTREAM[pathname], { signal: AbortSignal.timeout(30_000) });
       const body = await upstream.text();
-      res.writeHead(upstream.status, { 'content-type': 'application/json; charset=utf-8' });
+      res.writeHead(upstream.status, { ...CORS, 'content-type': 'application/json; charset=utf-8' });
       res.end(body);
     } catch (err) {
       // The app renders "Last successful fetch was N minutes ago" from this, so
       // the reason has to survive the round trip rather than becoming a 500.
-      res.writeHead(502, { 'content-type': 'application/json' });
+      res.writeHead(502, { ...CORS, 'content-type': 'application/json' });
       res.end(JSON.stringify({ error: 'upstream_unreachable', detail: String(err.message) }));
     }
     return;
@@ -85,7 +92,7 @@ const server = http.createServer(async (req, res) => {
     if (await serveFile(res, resolved)) return;
   }
 
-  res.writeHead(404, { 'content-type': 'text/plain; charset=utf-8' });
+  res.writeHead(404, { ...CORS, 'content-type': 'text/plain; charset=utf-8' });
   res.end(`Not found: ${pathname}\n`);
 });
 

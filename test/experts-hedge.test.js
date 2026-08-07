@@ -448,10 +448,10 @@ test('Analogue returns the matched instants and keeps its library bounded', () =
     analogue.update(s, outputFor(v));
   }
 
-  assert.equal(analogue.lib.length, 5000, 'library must be capped, not unbounded');
+  assert.equal(analogue.n, 5000, 'library must be capped, not unbounded');
   // Eviction must take the oldest: 8000 states into a 5000 slot ring leaves
   // nothing earlier than the 3000th.
-  const oldest = Math.min(...analogue.lib.map((rec) => rec.at));
+  const oldest = Math.min(...analogue.ats.subarray(0, analogue.n));
   assert.equal(oldest, base + 3000 * 300_000);
 
   const query = state({

@@ -5,7 +5,10 @@ each with the reason.
 
 ## Scope (spec §1 non-goals, recorded so scope does not creep)
 
-- Not a trading tool. No revenue, no bidding, no price forecasting; price is an input feature only.
+- Not a trading tool. The later financial-layer brief added observed prices,
+  revenue at the regional reference price and curtailment cost — all reporting
+  on what happened, none of it forecast. No bidding, no price forecasting, and
+  signals stay watch/hold/opportunity/risk rather than buy/sell.
 - Not a replacement for AEMO's AWEFS/ASEFS, which see turbine-level telemetry we do not.
 - Not multi-user. Single browser, IndexedDB, no accounts, no server-side persistence.
 - Not commercial. Licensing per §12.

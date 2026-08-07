@@ -16,7 +16,8 @@ services:
       node harvester/backfill.js --backfill 21 &&
       node harvester/backfill-weather.js --days 90 &&
       node harvester/backfill-price.js --days 21 &&
-      node harvester/correlate-run.js --days 21
+      node harvester/correlate-run.js --days 21 &&
+      node harvester/backtest.js --days 21
     startCommand: node harvester/serve.js
     healthCheckPath: /
     envVars:

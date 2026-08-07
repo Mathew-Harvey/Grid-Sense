@@ -75,6 +75,7 @@ Measured on renewables, median across stations.
 
 | Pass | 90% coverage by horizon (5min → 24h) | 80% coverage | Within ±3pp? | Change made |
 |---|---|---|---|---|
+| 5 | 90.0 / 90.0 / 89.9 / 87.3 / 85.8 | 80.0 / 80.0 / 80.0 / 78.3 / 75.6 | same as pass 4 | Widened the 24h residual window from ~7 days to ~25 (2000 → 7200 intervals), on the theory that a short window re-fits the band to each passing synoptic regime. Over 90 days the 90% band gained 0.4pp and the 80% band lost 0.7pp — a wash. Window size is not the binding constraint; **reverted** and F11 stays open with the sample-starvation diagnosis standing. |
 | 4 | 90.0 / 90.0 / 89.9 / **87.2** / 85.4 | 80.0 / 80.0 / 80.0 / **78.4** / 76.3 | **5min–6h yes**; 24h no (4.6pp / 3.7pp) | No parameter changed — re-measured over 90 days instead of 20, as F11's diagnostic named. 6h moved from 3.4pp short to inside tolerance on both bands. The same run lifted Loop B to 100% of renewable stations positive at every horizon, with solar @24h at +0.268. |
 | 3 | **90.0 / 90.0 / 89.8** / 86.6 / 83.8 | **80.0 / 80.1 / 80.0** / 77.7 / 75.3 | 5min, 30min and 1h **yes**; 6h marginal at 3.4pp; **24h no** | `update()` was recomputing the interval from the current alpha instead of scoring the band that was actually issued. At a six-hour horizon that band was made 72 intervals earlier and alpha had moved under it, so the feedback chased its own tail. Scoring the issued band brought 1h from 88.7 to 89.8 and 30min to exactly nominal. |
 | 2 | 90.0 / 87.9 / 86.1 / 77.0 / 80.2 | 80.2 / 78.4 / 76.5 / 68.1 / 70.7 | **worse** | Raised gamma to 0.02 on the theory that the long horizons were still converging. Coverage at 6h fell from 84.5 to 77.0 — the loop overshoots rather than under-adapts. Reverted. |
@@ -103,6 +104,7 @@ is what the counter is for.
 
 | Pass | Rubric failures | Change made |
 |---|---|---|
+| 16 | 1, found and fixed within the pass | Post-exit pass after wiring the power-curve scatter and the analogue panel. First screenshot showed the scatter panel blank while its note claimed 1,556 points drawn; a DOM probe found two chart hosts stacked in the panel — the app remounts every view when the worker reports ready, and the station view's destroy() never removed the elements it had appended, so the dead pair sat above the live chart and pushed it out of the panel. destroy() now removes what mount() added; re-shot all three widths clean. The same pass verified the analogue panel populating from the replay ("conditions most resemble 19 Jul 10:05") and the curtailed crosses sitting under the fitted curve. |
 | 15 | **0** | Third consecutive clean pass. Exit. |
 | 14 | **0** | Second consecutive clean pass. |
 | 13 | **0** | First clean pass after the station-view fixes: PIT caption moved inside the plot area, where a PIT histogram is reliably empty — below the axis it landed on the tick labels and both were unreadable at phone widths. |

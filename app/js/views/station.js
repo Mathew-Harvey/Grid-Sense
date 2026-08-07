@@ -11,6 +11,15 @@ import { getStationDay, unpackDay } from '../store.js';
 const fmt = (v, d = 1) => (Number.isFinite(v) ? v.toFixed(d) : '—');
 const pct = (v) => (Number.isFinite(v) ? `${(v * 100).toFixed(1)}%` : '—');
 
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+/** An instant as a person would say it, in NEM time (AEST, no DST, ever). */
+function nemWhen(ms) {
+  const d = new Date(ms + 10 * 3600_000);
+  return `${d.getUTCDate()} ${MONTHS[d.getUTCMonth()]} ` +
+    `${String(d.getUTCHours()).padStart(2, '0')}:${String(d.getUTCMinutes()).padStart(2, '0')}`;
+}
+
 /**
  * The station history chart: actual against UIGF against dispatch target, with
  * curtailed spans shaded behind them.
@@ -127,6 +136,37 @@ export function mount(root, ctx) {
 
   const series = createStationSeries(el('station-series'));
 
+  // The power-curve panel alternates between a chart and a prose explanation
+  // depending on fueltech. They toggle as siblings rather than replacing each
+  // other, because writing innerHTML over the host would detach the chart's
+  // canvas and every wind station selected afterwards would draw into a node
+  // no longer on the page.
+  const curveHost = el('power-curve');
+  const curveChartEl = document.createElement('div');
+  curveChartEl.style.height = '100%';
+  const curveMsgEl = document.createElement('p');
+  curveMsgEl.className = 'state-msg';
+  curveMsgEl.hidden = true;
+  curveHost.append(curveChartEl, curveMsgEl);
+
+  function curveMessage(html) {
+    curveMsgEl.innerHTML = html;
+    curveMsgEl.hidden = false;
+    curveChartEl.hidden = true;
+  }
+  function showCurveChart() {
+    curveMsgEl.hidden = true;
+    if (curveChartEl.hidden) {
+      curveChartEl.hidden = false;
+      // Re-measure on reveal: a chart drawn while its host was hidden kept
+      // whatever size it had before.
+      const box = curveChartEl.getBoundingClientRect();
+      if (optional.curve?.plot && box.width > 0) {
+        optional.curve.plot.setSize({ width: box.width, height: box.height });
+      }
+    }
+  }
+
   const lazy = async (key, path, factory, hostId, label) => {
     try {
       optional[key] = factory(await import(path));
@@ -137,7 +177,7 @@ export function mount(root, ctx) {
     }
   };
 
-  lazy('curve', '../charts/powercurve.js', (m) => m.createPowerCurve(el('power-curve')), 'power-curve', 'Power curve');
+  lazy('curve', '../charts/powercurve.js', (m) => m.createPowerCurve(curveChartEl), 'power-curve', 'Power curve');
   lazy('lag', '../charts/lagheatmap.js', (m) => m.createLagHeatmap(el('lag-heatmap')), 'lag-heatmap', 'Lag heatmap');
   lazy('pit', '../charts/calibration.js', (m) => ({
     hist: m.createPitHistogram(el('pit-histogram')),
@@ -197,29 +237,42 @@ export function mount(root, ctx) {
       // coal station drawn against a wind-speed axis is not an empty chart, it
       // is a wrong one — the negative temperature correlation on thermal plant
       // is winter demand, not weather driving generation.
-      const curveHost = el('power-curve');
       const isWind = row.fueltech === 'wind';
       const isSolar = row.fueltech === 'solar_utility';
+      const scatter = corr?.scatter ?? null;
       if (corr?.target_constant) {
         el('curve-note').textContent = '';
-        curveHost.innerHTML = '<p class="state-msg"><strong>No admissible data</strong>' +
-          'This station is curtailed in every interval it produces, so masking leaves nothing to fit.</p>';
-      } else if (isWind && corr?.curve?.converged && optional.curve) {
-        el('curve-note').textContent = `fitted on masked history · RMSE ${fmt(corr.curve.rmse)} MW`;
-        optional.curve.update({ x: [], y: [], masked: [], curve: corr.curve, capacityMw: row.capacity_mw });
+        curveMessage('<strong>No admissible data</strong>' +
+          'This station is curtailed in every interval it produces, so masking leaves nothing to fit.');
+      } else if (isWind && optional.curve && (corr?.curve?.converged || scatter)) {
+        const fitted = corr.curve?.converged ? corr.curve : null;
+        el('curve-note').textContent = fitted
+          ? `fitted on masked history · RMSE ${fmt(fitted.rmse)} MW` +
+            (scatter ? ` · ${scatter.x.length.toLocaleString()} of ${scatter.n.toLocaleString()} intervals drawn` : '')
+          : 'Fit did not converge; the observations are shown without a curve.';
+        showCurveChart();
+        optional.curve.update({
+          x: scatter?.x ?? [],
+          y: scatter?.y ?? [],
+          masked: scatter?.capped ?? [],
+          curve: fitted,
+          capacityMw: row.capacity_mw,
+        });
       } else if (isSolar && corr?.curve?.converged) {
         el('curve-note').textContent = '';
-        curveHost.innerHTML = '<p class="state-msg"><strong>Solar fit</strong>' +
+        curveMessage('<strong>Solar fit</strong>' +
           `Output tracks the clear-sky index with gain ${fmt(corr.curve.gain, 2)} and a temperature ` +
           `coefficient of ${fmt(corr.curve.tempCoeff, 3)} per °C, RMSE ${fmt(corr.curve.rmse)} MW. ` +
-          'The relationship is two-dimensional (index and irradiance together), so it is reported rather than drawn.</p>';
+          'The relationship is two-dimensional (index and irradiance together), so it is reported rather than drawn.');
       } else if (!isWind && !isSolar) {
         el('curve-note').textContent = '';
-        curveHost.innerHTML = '<p class="state-msg"><strong>Not weather-driven</strong>' +
+        curveMessage('<strong>Not weather-driven</strong>' +
           'Weather does not set this station’s output, so no power curve is fitted. ' +
-          'Any correlation with temperature here is demand moving dispatch, not weather moving the plant.</p>';
+          'Any correlation with temperature here is demand moving dispatch, not weather moving the plant.');
       } else {
-        el('curve-note').textContent = 'Curve fit did not converge.';
+        el('curve-note').textContent = '';
+        curveMessage('<strong>No curve</strong>' +
+          (corr?.curve?.reason ?? 'The correlation pass has not run for this station yet.'));
       }
 
       if (corr?.variables) optional.lag?.update(corr.variables);
@@ -242,10 +295,17 @@ export function mount(root, ctx) {
         }
       }
 
-      const analogue = state.stationDetail?.[row.station_id]?.analogue;
+      // "Was producing", not "went on to produce": the analogue library keys
+      // each instant by its own conditions and its own output, so the match
+      // says the hour ahead looks like that moment did, and this is what the
+      // station was doing in it.
+      const analogue = row.analogue;
       el('analogue-panel').innerHTML = analogue
-        ? `<strong>Closest analogue</strong>Current conditions most resemble ${analogue.when}, when this station went on to produce ${fmt(analogue.outcomeMw)} MW.`
-        : '<strong>No analogue yet</strong>The analogue expert matches live conditions against history; its picks surface here once the replay hands over to live data.';
+        ? '<strong>Closest analogue</strong>The conditions expected an hour from the replay cursor ' +
+          `most resemble ${nemWhen(analogue.observed_at)} NEM time, when this station was producing ` +
+          `${fmt(analogue.output_mw)} MW.`
+        : '<strong>No analogue yet</strong>The analogue expert needs a few hours of replay before its ' +
+          'library holds anything worth matching; its nearest match surfaces here as soon as it does.';
     },
     resize() {
       // A chart built while its panel was hidden measured zero and sized itself
@@ -268,6 +328,12 @@ export function mount(root, ctx) {
       optional.lag?.destroy();
       optional.pit?.hist.destroy();
       optional.pit?.rel.destroy();
+      // These were appended to a host this module does not own. The app
+      // remounts every view when the worker reports ready, and a pair left
+      // behind sits above the next mount's pair, pushing the live chart out
+      // of its panel.
+      curveChartEl.remove();
+      curveMsgEl.remove();
     },
   };
 }

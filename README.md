@@ -45,8 +45,9 @@ node harvester/backfill-weather.js --days 90    # ERA5 weather, ~1 min, ~400 of 
 node harvester/backfill-price.js --days 21      # regional prices, ~3 min
 node harvester/correlate-run.js --days 21       # fitted power curves + weather lags, ~2 min
 
-# Optional, slow: the walk-forward backtest that fills the initial skill matrix.
+# Optional: the walk-forward backtest that fills the initial skill matrix.
 # The dashboard trains live in a worker either way; this just pre-computes.
+# About 3 minutes at 20 days.
 node harvester/backtest.js --days 20
 
 npm run serve                                   # http://localhost:8080
@@ -61,35 +62,80 @@ dispatch day is roughly 30 MB of JSON on disk.
 
 ## Deploying on Render
 
-The harvester doubles as the production server: it serves the app, the data
-directory and the one CORS proxy route the browser cannot fetch itself. A
-`render.yaml` blueprint is included, so either point Render at the repo and it
-will pick the blueprint up, or create the service by hand:
+One component is required: a **Web Service** running the harvester. It builds
+the data at deploy time and then serves the app, the data directory and the
+proxy route, all from one origin. A **Static Site** for the app is an optional
+second component. A **Postgres database is not used — skip it** (details
+below).
+
+The included `render.yaml` blueprint describes the web service; point Render
+at the repo and it will pick it up, or create the service by hand.
+
+### The web service (required)
 
 | Setting | Value |
 |---|---|
 | Service type | Web Service |
 | Runtime | Node |
-| Build command | `npm install && node harvester/backfill.js --backfill 21 && node harvester/backfill-weather.js --days 90 && node harvester/backfill-price.js --days 21 && node harvester/correlate-run.js --days 21` |
+| Build command | `npm install && node harvester/backfill.js --backfill 21 && node harvester/backfill-weather.js --days 90 && node harvester/backfill-price.js --days 21 && node harvester/correlate-run.js --days 21 && node harvester/backtest.js --days 21` |
 | Start command | `node harvester/serve.js` |
 | Health check path | `/` |
 | Instance | **Standard (2 GB) or larger** — see memory note |
+| Environment variable | `NODE_OPTIONS` = `--max-old-space-size=1536` |
 
-The server honours `PORT`, which Render sets automatically.
+The server honours `PORT`, which Render sets automatically. The final
+`backtest.js` step pre-computes the skill matrix so the dashboard shows scores
+from first paint rather than after the replay warms up; dropping it saves
+about four minutes of build and costs exactly that.
 
 Three things worth knowing before the first deploy:
 
 - **Memory.** The backfill parses AEMO daily files that decompress to ~120 MB
   of text, so the build needs headroom well past the 512 MB free tier.
-  Standard (2 GB) builds cleanly. Alternatively run the backfill locally and
-  commit a data snapshot, then drop the backfill from the build command.
+  Standard (2 GB) builds cleanly with the `NODE_OPTIONS` value above.
 - **Ephemeral disk.** Render rebuilds `data/` on every deploy — that is by
   design here (fresh data each deploy, ~650 MB for 21 days). The build takes
-  roughly 10 minutes, most of it fetching from NEMWeb.
+  roughly 15 minutes, most of it fetching from NEMWeb.
 - **Data currency.** The backfill fetches up to the most recent completed
-  trading day at build time. Redeploy (or schedule a deploy hook) to refresh;
-  the app also polls AEMO's live 5-minute feeds through the server's proxy
-  route while it is open.
+  trading day at build time, and that is what the dashboard trains on — it
+  does not poll live feeds. To refresh the data, redeploy: a daily
+  [deploy hook](https://render.com/docs/deploy-hooks) hit by a scheduler is
+  the intended pattern.
+
+### The static site (optional)
+
+The app itself is ~1 MB of hand-written JS and CSS, so it can be served as a
+Render Static Site with the web service as its data plane. This buys CDN
+delivery for the app shell; the data still comes from the web service, which
+sends `Access-Control-Allow-Origin: *` on every route for exactly this
+arrangement. It is a nicety, not a requirement — the web service alone serves
+everything.
+
+| Setting | Value |
+|---|---|
+| Service type | Static Site |
+| Build command | `npm install && mkdir -p app/vendor/uplot/dist && cp node_modules/uplot/dist/uPlot.esm.js node_modules/uplot/dist/uPlot.min.css app/vendor/uplot/dist/` |
+| Publish directory | `app` |
+
+Then tell the app where the harvester lives: in `app/index.html`, uncomment
+the one line in the head and set it to the web service's URL —
+
+```html
+window.GRIDSENSE_API_BASE = 'https://<your-web-service>.onrender.com';
+```
+
+The build command exists because the page loads uPlot from `/vendor/`, which
+the web service maps to `node_modules` but a static publish must carry as
+files.
+
+### The Postgres database (skip it)
+
+Nothing in GridSense connects to a database. The data layer is flat JSON files
+on the server's disk, rebuilt each deploy, plus IndexedDB inside the browser —
+there is no `DATABASE_URL` to set, and a provisioned Postgres instance would
+sit idle at full price. If a need appears later (say, keeping harvested
+history across deploys instead of re-fetching it), that is a design change to
+the harvester, not a configuration step.
 
 ## The numbers behind it
 

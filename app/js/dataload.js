@@ -22,7 +22,11 @@ import {
   packDay, putStationDay, putWeatherDay, setMeta, getMeta,
 } from './store.js';
 
-const DATA = './data';
+// Same origin by default. A split deploy — the app as a static site, the
+// harvester as a separate service — points this at the harvester's origin by
+// setting window.GRIDSENSE_API_BASE before the app boots; the server sends
+// open CORS for exactly that arrangement.
+const DATA = `${globalThis.GRIDSENSE_API_BASE ?? ''}/data`;
 const MS_PER_DAY = 86_400_000;
 
 /** Three weeks is past the seven-day conformal window with room for a warm-up,
