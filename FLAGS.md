@@ -407,3 +407,46 @@ Linking `uPlot.min.css` put the canvas at y=222, exactly matching its host.
 
 **Status:** resolved. The band now renders actual, forecast, the 80% and 90%
 bands, the ghost band and the now-rule across 48 hours.
+
+---
+
+## F13 — The replay worker sustains 11–21 intervals/second, not 500
+
+The main-thread half of the performance budget is met: over 1,200 consecutive
+frames during replay, frame-to-frame p50 was 16.7 ms (the display's vsync
+period — the main thread was idle), p95 19.1 ms, and zero long tasks were
+observed. The page stays interactive throughout.
+
+The worker half is not. Sustained training throughput:
+
+| Replay position | Rate |
+|---|---|
+| ~900 intervals | 21/s |
+| ~1,600 intervals | 15/s |
+| ~2,500 intervals | 11/s |
+
+The decay curve is the diagnosis: the analogue expert's library fills toward its
+5,000-state cap, and every prediction linearly scans it. At steady state that is
+55 stations × 5 horizons × 5,000 states ≈ **1.4 million distance evaluations per
+dispatch interval**, which matches both the browser rate and the Node backtest
+rate (~25/s over 20 days). The cost is arithmetic, not rendering or messaging.
+
+Consequences, stated against the original bar:
+
+- "Replay runs 90 days in under two minutes" required ≥216 intervals/s. At the
+  measured rate, 90 days takes hours, which is why the shipped default window is
+  21 days (~8 minutes of background training that the user can watch, scrub and
+  pause, with the page fully responsive throughout).
+- The 500/s transport setting is an offer the worker cannot honour. The
+  transport reports the real measured rate beside it, so the gap is visible
+  rather than implied away.
+
+The remedy is known and bounded: either an indexed neighbour search (a
+vantage-point tree over the 8-dimensional state vectors turns the scan into
+O(log n)) or a smaller per-horizon library. Both change model behaviour, so
+either belongs in a measured Loop B pass with before/after skill scores, not in
+a performance patch. Not attempted here for exactly that reason.
+
+**Status:** open, measured, cause identified, remedy scoped. The main-thread
+exit condition of Loop E is met; the replay-speed element of the definition of
+done is not.

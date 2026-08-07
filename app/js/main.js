@@ -242,6 +242,7 @@ async function boot() {
   }
 
   ctx.correlationById = loaded.correlationById ?? new Map();
+  ctx.days = loaded.days ?? [];
   state.quality = qualityStrip(loaded);
   state.prices = loaded.prices ?? null;
 

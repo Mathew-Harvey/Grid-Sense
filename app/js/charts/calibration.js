@@ -144,7 +144,10 @@ function captionPlugin(read) {
         ctx.fillStyle = COLOURS.dim;
         ctx.textAlign = 'left';
         ctx.textBaseline = 'bottom';
-        ctx.fillText(text, u.bbox.left, u.bbox.top + u.bbox.height + 26);
+        // Inside the plot, top-left, where a PIT histogram is reliably empty —
+        // its mass gathers at the bars. Below the axis the caption lands on the
+        // tick labels and both become unreadable at phone widths.
+        ctx.fillText(text, u.bbox.left + 4, u.bbox.top + 6);
         ctx.restore();
       },
     },

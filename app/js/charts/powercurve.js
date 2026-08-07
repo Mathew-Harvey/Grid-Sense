@@ -125,6 +125,7 @@ export function createPowerCurve(el, { xLabel = 'wind speed at hub height (m/s)'
   const cloud = { x: [], y: [], masked: [] };
   let extent = null;
   let marks = [];
+  const view = { xMin: 0, xMax: 0, yMax: 0 };
 
   const label = (u, x, text, tone) => {
     const { ctx } = u;
@@ -233,8 +234,11 @@ export function createPowerCurve(el, { xLabel = 'wind speed at hub height (m/s)'
     scales: {
       // Speed, not time. uPlot treats the x scale as epoch seconds unless told
       // otherwise, and the tick labels come out as 1970.
-      x: { time: false, range: () => (extent ? [extent.xMin, extent.xMax] : [0, 1]) },
-      y: { range: () => (extent ? [0, extent.yMax * 1.05] : [0, 1]) },
+      // The viewport follows the scatter when there is one and the fitted line
+      // when there is not. Pinned to [0,1] as a last resort, a real curve gets
+      // drawn outside the visible range and the panel reads as "flat at zero".
+      x: { time: false, range: () => (view.xMax > view.xMin ? [view.xMin, view.xMax] : [0, 1]) },
+      y: { range: () => (view.yMax > 0 ? [0, view.yMax * 1.05] : [0, 1]) },
     },
     series: [
       {},
@@ -276,9 +280,19 @@ export function createPowerCurve(el, { xLabel = 'wind speed at hub height (m/s)'
       extent = scatterExtent(d.x, d.y);
       marks = curveMarks(d.curve);
 
-      const fitted = extent
-        ? sampleFittedCurve(d.curve, d.capacityMw, extent.xMin, extent.xMax)
+      // Without a scatter the extent has to come from the curve itself, or the
+      // fitted line silently fails to draw and the panel reads as "no fit"
+      // when there is one.
+      const span = extent ?? (d.curve ? {
+        xMin: 0,
+        xMax: Math.max(d.curve.cutOut ?? 0, (d.curve.rated ?? 0) * 1.6, 25),
+      } : null);
+      const fitted = span
+        ? sampleFittedCurve(d.curve, d.capacityMw, span.xMin, span.xMax)
         : null;
+      view.xMin = span?.xMin ?? 0;
+      view.xMax = span?.xMax ?? 0;
+      view.yMax = extent?.yMax ?? (fitted ? Math.max(...fitted.y) : 0);
       plot.setData(fitted ? [fitted.x, fitted.y] : [[], []]);
     },
     destroy() { stopResize(); plot.destroy(); },

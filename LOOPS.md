@@ -83,19 +83,26 @@ Measured on renewables, median across stations.
 **Exit:** three consecutive passes with no rubric failure, minimum three passes.
 **Max passes:** 7. Screenshots saved to `screenshots/loop-d-pass-N/`.
 
-**No rubric failures at pass 9, one clean pass of the three the exit needs.**
-The app boots in about eight seconds, and the conviction band is the centrepiece
-it was meant to be with price and revenue layered beneath it on the same time
-axis. Nine passes cleared six classes of defect, every one of them found by
-looking at the rendered page rather than at the code.
+**Exit reached at pass 15**: passes 13, 14 and 15 are three consecutive passes
+with no rubric failure, against a minimum of three. Fifteen passes cleared eight
+classes of defect, every one found by looking at the rendered page rather than
+at the code. Screenshots for every pass are in `screenshots/loop-d-pass-N/` at
+1440, 1024 and 390 px.
 
-The exit condition asks for three consecutive clean passes and this is the first,
-so the loop is not closed. Screenshots for the final pass are in
-`screenshots/loop-d-pass-9/` at 1440, 1024 and 390 px.
+Pass 9 had been recorded as clean, and pass 10's review showed that was wrong —
+the station view had never been examined closely and its main series panel was
+entirely blank. The clean-pass counter was reset rather than argued with, which
+is what the counter is for.
 
 | Pass | Rubric failures | Change made |
 |---|---|---|
-| 9 | **0** | Wired the price overlay and revenue ribbon to the real backfill. All four layers now share one time axis: band, expert ribbon, price on a symmetric-log axis, cumulative revenue. |
+| 15 | **0** | Third consecutive clean pass. Exit. |
+| 14 | **0** | Second consecutive clean pass. |
+| 13 | **0** | First clean pass after the station-view fixes: PIT caption moved inside the plot area, where a PIT histogram is reliably empty — below the axis it landed on the tick labels and both were unreadable at phone widths. |
+| 12 | 1 — PIT caption collides with axis labels | Power-curve viewport fixed: the scale ranges pinned to [0,1] when the scatter was empty, so a correctly fitted curve drew outside the visible range and the panel read as "flat at zero" — which is indistinguishable from "no fit" and worse than an error. |
+| 11 | 2 — power curve invisible; station x-axis printed "10:00" twenty-one times | Station view rebuilt: the main series panel had been blank since it was written (the chart host existed in the HTML and no code ever drew it). It now reads three weeks of history from IndexedDB — actual, UIGF and dispatch target with curtailed spans shaded behind them. Power-curve panel made honest per fuel: fitted curve for wind, reported coefficients for solar (the fit is two-dimensional, so it is stated rather than drawn), and for thermal an explanation that the temperature correlation is demand, not weather. Fleet-level PIT and reliability panels labelled "whole fleet". Default station is the largest wind farm rather than the largest coal plant. |
+| 10 | 3 — station series blank, coal drawn against a wind-speed axis, fleet PIT unlabelled on a station view | The review pass that caught pass 9's "clean" being wrong. No fix in this pass; findings recorded and the counter reset. |
+| 9 | 0 *(recorded clean, later found wrong — station view unexamined)* | Wired the price overlay and revenue ribbon to the real backfill. All four layers now share one time axis: band, expert ribbon, price on a symmetric-log axis, cumulative revenue. |
 | 8 | 1 — price overlay unwired | Added per-fuel and per-region lanes to the replay worker, accumulated in the same pass as the fleet total so the frame budget is untouched. Fuel mix and regions now carry real data. The region table reports actual and share only — the replay calibrates one band for the whole fleet, so apportioning its skill across regions would print a number that looks measured and is not. |
 | 7 | 2 — fuel mix and regions have no data source | Ran the price backfill: 21 days, and the real range is what the symlog axis was built for — SA1 from −$204 to $16,971 with 1,541 negative intervals, TAS1 peaking at $23,200, VIC1 down to −$757. |
 | 6 | 3 | **Root cause found by measuring the DOM.** uPlot's stylesheet had never been linked, so every canvas was positioned 233 px below its own container and clipped. The band, and every other chart, had been drawing correctly in the wrong place the whole time (FLAGS F12). Also clipped the aggregate band to fleet capacity, which moved 24h skill from −0.109 to **+0.128**; and bounded the expert ribbon to scored history, which had been indexing past the end of the weights array. |
@@ -115,14 +122,25 @@ loaded.
 block interaction.
 **Max passes:** 5.
 
-**Not started — blocked.** The metric is main-thread frame time during replay,
-which needs a running page (FLAGS F10). The worker is written and posts
-transferable buffers batched to one message per animation frame, which is the
-design the budget depends on, but it is unmeasured.
+**Main-thread exit met at pass 1; replay throughput recorded as F13.** Measured
+over 1,200 consecutive frames (20 s) while the replay trained 55 stations:
+frame-to-frame p50 16.7 ms — the display's own vsync period, meaning the main
+thread was idle — p95 19.1 ms, p99 22.7 ms, worst 32.5 ms, and **zero long
+tasks** (>50 ms) observed. The replay does not block interaction; the worker
+isolation and transferable-buffer batching do what they were designed to do.
+
+The replay *worker* sustains 11–21 intervals/second, not the 500 the transport
+offers, and throughput decays as the analogue expert's library fills — 21/s at
+900 intervals, 11/s at 2,500. The bottleneck is arithmetic, not rendering:
+55 stations × 5 horizons × a linear scan of a 5,000-state analogue library is
+about 1.4 million distance evaluations per interval. Recorded honestly in
+FLAGS F13 rather than fixed by quietly shrinking the library mid-run, because
+the library size is a model parameter and the 90-day backtest was mid-flight on
+the current value.
 
 | Pass | Frame time (p50 / p95) | Bottleneck fixed |
 |---|---|---|
-| — | — | blocked on F10 |
+| 1 | **16.7 / 19.1 ms**, 0 long tasks | None needed on the main thread. Worker throughput 11–21/s recorded as F13. |
 
 ---
 

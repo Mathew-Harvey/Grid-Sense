@@ -1,0 +1,27 @@
+# Render blueprint. The harvester is the production server: it serves the app,
+# the data it built at deploy time, and the one proxy route the browser needs
+# because nemweb.com.au sends no CORS headers.
+#
+# The plan is Standard because the backfill parses AEMO daily files that
+# decompress to ~120 MB of text; the 512 MB free tier runs out of memory
+# mid-build. Data lives on ephemeral disk and is rebuilt each deploy, which is
+# the point — every deploy ships fresh market data.
+services:
+  - type: web
+    name: gridsense
+    runtime: node
+    plan: standard
+    buildCommand: >-
+      npm install &&
+      node harvester/backfill.js --backfill 21 &&
+      node harvester/backfill-weather.js --days 90 &&
+      node harvester/backfill-price.js --days 21 &&
+      node harvester/correlate-run.js --days 21
+    startCommand: node harvester/serve.js
+    healthCheckPath: /
+    envVars:
+      # The dispatch parse holds a ~120 MB CSV and its row objects at once, and
+      # Node's default old-space cap on a 2 GB container sits near 1 GB, which
+      # is closer to that peak than a build should run.
+      - key: NODE_OPTIONS
+        value: --max-old-space-size=1536
