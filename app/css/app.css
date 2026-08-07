@@ -664,3 +664,46 @@ html[data-mode='expert'] .lane-label { display: none; }
   .learn-figure { position: static; }
   .learn-figure canvas { height: 180px; }
 }
+
+/* ---- the map ----------------------------------------------------------- */
+
+.map-wrap { position: relative; }
+
+#map-canvas {
+  width: 100%;
+  height: min(72vh, 720px);
+  min-height: 380px;
+  cursor: grab;
+  /* A faint radial lift under the continent, so the landmass reads as sitting
+   * on something rather than floating in a void. */
+  background:
+    radial-gradient(ellipse at 50% 58%, rgba(43,111,143,0.16), transparent 62%),
+    var(--surface);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+
+#map-canvas:active { cursor: grabbing; }
+#map-canvas canvas { display: block; }
+
+.map-legend {
+  position: absolute;
+  top: var(--s3);
+  left: var(--s3);
+  display: flex;
+  gap: var(--s4);
+  padding: var(--s2) var(--s3);
+  background: rgba(13, 19, 23, 0.78);
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+  pointer-events: none;
+}
+
+.map-legend table { width: auto; font-size: 12px; }
+.map-legend th, .map-legend td { padding: 1px var(--s2); border: 0; }
+.map-legend td:last-child { color: var(--text); }
+
+@media (max-width: 640px) {
+  #map-canvas { height: 58vh; }
+  .map-legend { flex-direction: column; gap: 2px; font-size: 11px; }
+}

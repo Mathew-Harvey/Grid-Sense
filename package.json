@@ -4,7 +4,9 @@
   "private": true,
   "type": "module",
   "description": "Weather-driven forecasts for Australian power stations, scored honestly against a baseline.",
-  "engines": { "node": ">=22" },
+  "engines": {
+    "node": ">=22"
+  },
   "scripts": {
     "test": "node --test \"test/**/*.test.js\"",
     "harvest": "node harvester/serve.js",
@@ -13,6 +15,7 @@
   },
   "dependencies": {
     "fflate": "^0.8.2",
+    "three": "^0.185.1",
     "uplot": "^1.6.31"
   }
 }

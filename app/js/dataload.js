@@ -493,6 +493,30 @@ export async function loadAll({ days = DEFAULT_DAYS, force = false, onProgress =
   }
   report('weather', 'Weather stored', stations.length, stations.length);
 
+  // ---- regional demand and interconnector flow --------------------------
+  // Small enough to hold in memory: five regions and six interconnectors at
+  // five-minute resolution over three weeks is about 70,000 numbers.
+  const flows = new Map();
+  let flowDays = 0;
+  for (const day of loadedDays) {
+    let file;
+    try {
+      file = await fetchJson(`${DATA}/flows/${day.iso}.json`);
+    } catch {
+      continue;
+    }
+    flowDays++;
+    for (const row of file.intervals ?? []) {
+      if (Number.isFinite(row.at)) flows.set(row.at, { demand: row.demand, flow: row.flow });
+    }
+  }
+  if (flowDays === 0) {
+    notes.push({
+      source: 'flows',
+      message: `No regional demand under ${DATA}/flows/. The map shows generation only until harvester/backfill-flows.js has run.`,
+    });
+  }
+
   // ---- prices -----------------------------------------------------------
   report('prices', 'Regional prices', 0, 1);
   const prices = await loadPrices(loadedDays, notes);
@@ -507,7 +531,7 @@ export async function loadAll({ days = DEFAULT_DAYS, force = false, onProgress =
 
   return finish({
     registry, stations, byId, backtest, correlations, correlationById, curves,
-    days: loadedDays, weatherDays, prices, notes, startedAt,
+    days: loadedDays, weatherDays, prices, flows, notes, startedAt,
   });
 }
 

@@ -46,6 +46,10 @@ const UPSTREAM = {
 // made by hand on one developer's machine.
 const ALIASES = {
   '/data/registry.json': path.join(HERE, 'registry.json'),
+  // Coastlines are committed source too — a fixed simplification of public
+  // state boundaries, not something the harvester produces — so they live with
+  // the app and are aliased into the same /data/ namespace the app fetches from.
+  '/data/au-states.json': path.join(APP_DIR, 'data', 'au-states.json'),
 };
 
 // Everything here is public read-only data, and the open header is what lets

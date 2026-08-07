@@ -38,6 +38,7 @@
     <button type="button" role="tab" aria-selected="true" data-view="aggregate">Aggregate</button>
     <button type="button" role="tab" aria-selected="false" data-view="station">Station detail</button>
     <button type="button" role="tab" aria-selected="false" data-view="training">Training monitor</button>
+    <button type="button" role="tab" aria-selected="false" data-view="map">Map</button>
     <button type="button" role="tab" aria-selected="false" data-view="learn">How this works</button>
   </nav>
 
@@ -165,6 +166,17 @@
         </div>
       </div>
 
+    </section>
+
+    <!-- ── Map ───────────────────────────────────────────────────────── -->
+    <section id="view-map" class="grid" data-view-panel hidden>
+      <div class="panel col-12" data-explain="map">
+        <header><h2>Where the power is made and used</h2><span class="note">drag to turn · scroll to zoom</span></header>
+        <div class="map-wrap">
+          <div id="map-canvas"></div>
+          <div id="map-legend" class="map-legend"></div>
+        </div>
+      </div>
     </section>
 
     <!-- ── How this works ────────────────────────────────────────────── -->

@@ -13,6 +13,7 @@ export const DECK = {
     "aggregate": "Whole market",
     "station": "One station",
     "training": "Watch it learn",
+    "map": "The map",
     "learn": "How this works"
   },
   "panels": {
@@ -71,6 +72,10 @@ export const DECK = {
     "coverage": {
       "plainTitle": "Nine times out of ten",
       "caption": "Each row tests one [[horizon|horizon]] against two promises: the 90% [[band|band]] and a tighter 80% one. A delivery window should contain the knock nine times in ten — no more, no fewer. Red is a promise broken, in either direction: too few catches, or 100%, a window so wide it stopped saying anything. That's [[coverage|coverage]], and it should settle near its target as the model learns; red rows mean it hasn't."
+    },
+    "map": {
+      "plainTitle": "Where power is made and used",
+      "caption": "Each glowing column is a real power station at its real location, its height the share of its capacity it is producing right now. The floor under each state brightens with that state's [[demand|demand]] — how much is being consumed there. Arcs are power crossing between states, travelling the way it actually flowed. Western Australia glows too, from its own market's demand feed — but it has no arcs, because its grid does not physically connect to the east."
     },
     "matrix": {
       "plainTitle": "Where the model wins",
@@ -153,6 +158,10 @@ export const DECK = {
     "powercurve": {
       "name": "Power curve",
       "plain": "The relationship between wind speed and a turbine's output: nothing in light air, a steep climb, then flat at full power. Each machine has its own version, like a car's fuel-economy curve."
+    },
+    "demand": {
+      "name": "Demand",
+      "plain": "How much electricity is being consumed in a region at this moment, in megawatts. Published per state only — nobody publishes it street by street, so this map cannot show it that finely."
     },
     "region": {
       "name": "Region",

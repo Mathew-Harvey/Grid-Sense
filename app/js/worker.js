@@ -751,6 +751,12 @@ function stationRows(state) {
     capacity_mw: track.capacity,
     has_weather: track.hasWeather,
     analogue: track.analogue,
+    lat: track.meta.lat,
+    lon: track.meta.lon,
+    // What this station is producing at the replay cursor. The map draws it
+    // geographically, so it travels with the row rather than in a frame lane —
+    // it moves once a second, not sixty times.
+    output_mw: Number.isFinite(track.target[state.cursor - 1]) ? track.target[state.cursor - 1] : null,
     horizons: HORIZONS.map((hz, h) => {
       const slot = track.slots[h];
       if (slot.n === 0) return { horizon: hz.label, n: 0, skill: null };

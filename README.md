@@ -43,7 +43,12 @@ sentence, and the two flagship charts carry a "How to read this" overlay that
 labels their live pixels. The **Expert** toggle in the masthead restores the
 original instrument, and the browser remembers the choice.
 
-Runtime dependencies: `fflate` and `uplot`. That is the whole list.
+A **Map** tab puts it in geography: every station as a column at its real
+coordinates rising with output, each state's floor lit by its measured demand,
+and interconnector flows as arcs travelling the way the power actually went.
+
+Runtime dependencies: `fflate`, `uplot` and `three`. `three` was added for the
+map and is loaded only by that view.
 
 ## Running locally
 
@@ -57,6 +62,9 @@ node harvester/backfill.js --backfill 21        # NEM dispatch, ~3 min
 node harvester/backfill-weather.js --days 90    # ERA5 weather, ~1 min, ~400 of Open-Meteo's 10k daily calls
 node harvester/backfill-price.js --days 21      # regional prices, ~3 min
 node harvester/correlate-run.js --days 21       # fitted power curves + weather lags, ~2 min
+node harvester/build-wem-codes.js               # join WA facilities to stations, ~10 s
+node harvester/backfill-wem.js --days 21        # Western Australian dispatch, ~10 s
+node harvester/backfill-flows.js --days 21      # regional demand + interconnector flow, ~1 min
 
 # Optional: the walk-forward backtest that fills the initial skill matrix.
 # The dashboard trains live in a worker either way; this just pre-computes.

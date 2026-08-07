@@ -14,8 +14,9 @@ import * as aggregateView from './views/aggregate.js';
 import * as stationView from './views/station.js';
 import * as trainingView from './views/training.js';
 import * as learnView from './views/learn.js';
+import * as mapView from './views/map.js';
 
-const VIEWS = { aggregate: aggregateView, station: stationView, training: trainingView, learn: learnView };
+const VIEWS = { aggregate: aggregateView, station: stationView, training: trainingView, learn: learnView, map: mapView };
 
 const state = {
   frame: null,
@@ -140,6 +141,8 @@ function startWorker(loaded) {
       case 'stations':
       case 'handover':
         state.stationRows = m.rows;
+        // The map wants output by station id; every other view wants the rows.
+        state.stationOutput = new Map(m.rows.map((r) => [r.station_id, r.output_mw]));
         if (m.stats) state.stats = unpackStats(m.stats, statsLayout);
         // Not "switching to live updates": nothing polls. The window ends at
         // the last day the harvester built, and it stays there until the
@@ -221,6 +224,7 @@ function remountViews() {
     station: stationView.mount(document.getElementById('view-station'), ctx),
     training: trainingView.mount(document.getElementById('view-training'), ctx),
     learn: learnView.mount(document.getElementById('view-learn'), ctx),
+    map: mapView.mount(document.getElementById('view-map'), ctx),
   };
   const selected = document.querySelector('.views button[aria-selected="true"]')?.dataset.view ?? 'aggregate';
   showView(selected);
@@ -254,6 +258,11 @@ async function boot() {
   }
 
   ctx.correlationById = loaded.correlationById ?? new Map();
+  // Regional demand and interconnector flow, indexed by interval so the map can
+  // ask for the instant the replay is showing rather than tracking its own clock.
+  if (loaded.flows?.size) {
+    ctx.flowsAt = (ms) => loaded.flows.get(Math.round(ms / 300_000) * 300_000) ?? null;
+  }
   ctx.days = loaded.days ?? [];
   state.quality = qualityStrip(loaded);
   state.prices = loaded.prices ?? null;
