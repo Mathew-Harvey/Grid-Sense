@@ -60,22 +60,28 @@ npm run build:data                              # the whole pipeline, ~15 min
 npm run serve                                   # http://localhost:8080
 ```
 
-`build:data` is these steps in this order — dispatch before weather before
-correlate — and can be run one at a time if you want to stop partway:
+`build:data` is these steps, and can be run one at a time if you want to stop
+partway:
 
 ```bash
 node harvester/backfill.js --backfill 21        # NEM dispatch, ~3 min
-node harvester/backfill-weather.js --days 90    # ERA5 weather, ~1 min, ~400 of Open-Meteo's 10k daily calls
-node harvester/backfill-price.js --days 21      # regional prices, ~3 min
-node harvester/correlate-run.js --days 21       # fitted power curves + weather lags, ~2 min
 node harvester/build-wem-codes.js               # join WA facilities to stations, ~10 s
 node harvester/backfill-wem.js --days 21        # Western Australian dispatch, ~10 s
+node harvester/backfill-weather.js --days 90    # ERA5 weather, ~1 min, ~400 of Open-Meteo's 10k daily calls
+node harvester/backfill-price.js --days 21      # regional prices, ~3 min
 node harvester/backfill-flows.js --days 21      # regional demand + interconnector flow, ~1 min
+node harvester/correlate-run.js --days 21       # fitted power curves + weather lags, ~2 min
 node harvester/backtest.js --days 21            # walk-forward skill matrix, ~3 min
 ```
 
-Only the last one is optional: the dashboard trains live in a worker either
-way, and `backtest.js` just pre-computes the matrix so scores are there from
+The order is a dependency order, not a preference: every step reads what the
+steps above it wrote, and running one early does not fail — it quietly produces
+less. `correlate-run.js` before `backfill-wem.js` writes a correlations file
+with no Western Australian curves in it and exits zero. `test/build-order.test.js`
+asserts the order against what each script reads, so this cannot drift again.
+
+Only `backtest.js` is optional: the dashboard trains live in a worker either
+way, and the backtest just pre-computes the matrix so scores are there from
 first paint. Dropping it saves about three minutes and costs exactly that.
 
 Cold start in the browser takes about 10 seconds against a local harvester: the

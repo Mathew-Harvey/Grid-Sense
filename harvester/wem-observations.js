@@ -43,10 +43,20 @@ export async function loadWemObservations(stations, days, { admitUnknownMask = f
   const byStation = new Map();
   if (wanted.size === 0) return byStation;
 
+  // An absent directory used to return an empty map in silence, which reads
+  // downstream as "Western Australia has no stations" rather than "the WA
+  // backfill has not run" — the failure this warning exists to name.
   let files;
   try {
     files = (await fs.readdir(WEM_DIR)).sort().slice(-days);
   } catch {
+    files = [];
+  }
+  if (files.length === 0) {
+    console.warn(
+      `No Western Australian dispatch in ${WEM_DIR} — ${wanted.size} SWIS stations ` +
+      'will be skipped. Run harvester/backfill-wem.js before this step.',
+    );
     return byStation;
   }
 

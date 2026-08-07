@@ -670,3 +670,20 @@ while everything older worked. The README now says so at the point where
 someone would hit it.
 
 **Status:** resolved, with the class closed by a test rather than by care.
+
+## F17 — a build step ordered before the step that produces its input
+
+`build:data` initially ran `correlate-run.js` before `backfill-wem.js`, while
+`correlate-run.js` reads `data/wem-dispatch/` for its Western Australian
+observations. On the machine where the WA backfill had already been run by
+hand the order was invisible; on a clean checkout it would have written a
+correlations file with no WA curves in it and exited zero.
+
+The absence had no symptom at build time because `loadWemObservations`
+answered a missing directory with an empty map. It now warns, naming the
+station count it is skipping and the script that should have run first, and
+`test/build-order.test.js` asserts the pipeline order against what each step
+reads rather than against the order that happens to be written down.
+
+Found by checking a build command against its dependencies rather than
+assuming the order that produced correct output locally was the correct order.
