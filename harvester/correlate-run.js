@@ -13,6 +13,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { correlateStation } from '../app/js/correlate.js';
 import { normaliseNemUnitSolution } from './normalise.js';
+import { loadWemObservations } from './wem-observations.js';
 import {
   airDensity, windPower, windShear, clearSkyGhi, clearSkyIndex, solarZenith,
 } from '../app/js/weather.js';
@@ -90,9 +91,22 @@ export async function run({ days = 30, limit = null } = {}) {
     if (!list) byStation.set(o.station_id, (list = []));
     list.push(o);
   }
+  // Western Australia, from its own feed. Its curtailment mask is unknown
+  // rather than false, and the correlation pass only looks at intervals it
+  // knows to be uncurtailed — so WA is admitted explicitly, with the caveat
+  // carried in the bundle and stated in the interface, rather than being
+  // silently excluded from every fitted curve on the continent.
+  const wem = await loadWemObservations(stations, days, { admitUnknownMask: true });
+  let wemObservations = 0;
+  for (const [stationId, list] of wem) {
+    byStation.set(stationId, list);
+    wemObservations += list.length;
+  }
+
   console.log(
-    `Loaded ${files.length} days, ${counts.observations} observations ` +
-    `(${counts.ok} ok, ${counts.partial} partial, ${counts.suspect} suspect)\n`,
+    `Loaded ${files.length} days, ${counts.observations} NEM observations ` +
+    `(${counts.ok} ok, ${counts.partial} partial, ${counts.suspect} suspect)` +
+    `, ${wemObservations} WA observations across ${wem.size} stations\n`,
   );
 
   const results = [];
@@ -104,6 +118,11 @@ export async function run({ days = 30, limit = null } = {}) {
 
     const bundle = correlateStation(series, weather, station.fueltech);
     results.push({
+      // WA has no published curtailment flag, so its fit saw every interval
+      // including any the market had constrained. A reader comparing a WA curve
+      // to an eastern one is entitled to know they were fitted under different
+      // rules.
+      curtailment_mask: station.region === 'SWIS' ? 'unpublished' : 'next-day',
       station_id: station.station_id,
       station_name: station.station_name,
       fueltech: station.fueltech,

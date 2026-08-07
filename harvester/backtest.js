@@ -21,6 +21,7 @@ import { Hedge } from '../app/js/models/hedge.js';
 import { AdaptiveConformal } from '../app/js/models/conformal.js';
 import { crps, skillScore, pitValue, pitHistogram } from '../app/js/models/score.js';
 import { observedAt } from '../app/js/align.js';
+import { loadWemObservations } from './wem-observations.js';
 import {
   airDensity, windPower, windShear, clearSkyGhi, clearSkyIndex, solarZenith,
 } from '../app/js/weather.js';
@@ -374,6 +375,14 @@ export async function run({ days = 60, stations: only = null } = {}) {
   console.log(`Backtest over ${files.length} days, ${ordered.length} intervals, ${stations.length} stations\n`);
 
   const seriesByStation = buildStationSeries(ordered, stations);
+
+  // Western Australia arrives already folded to station level from its own
+  // feed. Its curtailment mask is unpublished, so the intervals are admitted
+  // explicitly here — the alternative is that every WA station scores zero
+  // usable intervals and silently drops out of the skill matrix.
+  const wem = await loadWemObservations(stations, days, { admitUnknownMask: true });
+  for (const [stationId, list] of wem) seriesByStation.set(stationId, list);
+  if (wem.size) console.log(`Including ${wem.size} Western Australian stations\n`);
 
   const results = [];
   for (const station of stations) {

@@ -21,7 +21,7 @@
 // leaving a reader to assume the data is missing.
 
 import * as THREE from '/vendor/three/build/three.module.js';
-import { fueltechColour } from '../charts/base.js';
+import { fueltechColour, FUELTECH_CODE } from '../charts/base.js';
 
 // Australia in degrees, and the plane it is drawn on. Longitude east and
 // latitude north map to x and z; y is reserved for quantity, so height on this
@@ -99,7 +99,11 @@ export function mount(root, ctx) {
   // North up, east right, and still. A map that rotates on its own is
   // disorienting for the one job this view has — telling you where things are —
   // so the reader turns it or it stays put.
-  const view = { angle: 0, tilt: 1.02, distance: 58, auto: false };
+  const view = { angle: 0, tilt: 1.02, distance: 58 };
+  // The camera eases toward whatever the pointer asked for. Applying drag
+  // deltas straight to the transform is what made turning the map feel like
+  // dragging a heavy object across a rough floor.
+  const target = { ...view };
   const applyCamera = () => {
     const r = view.distance;
     camera.position.set(
@@ -182,17 +186,36 @@ export function mount(root, ctx) {
       const [x, z] = project(s.lon, s.lat);
       // Radius from nameplate so a 2.8 GW coal station reads as bigger than a
       // 20 MW farm, on a cube root so the largest does not swamp the map.
-      const r = 0.16 + Math.cbrt(Math.max(s.capacity_mw, 1)) * 0.034;
+      const r = 0.09 + Math.cbrt(Math.max(s.capacity_mw, 1)) * 0.021;
+      const colour = hexToColor(fueltechColour(s.fueltech));
+      // Additive, so overlapping columns in the Latrobe or Hunter valleys read
+      // as one brighter cluster instead of a muddy pile of translucent tubes —
+      // which is exactly what stacked alpha was doing.
       const mesh = new THREE.Mesh(
-        new THREE.CylinderGeometry(r, r, 1, 10),
+        new THREE.CylinderGeometry(r, r * 1.25, 1, 8, 1, true),
         new THREE.MeshBasicMaterial({
-          color: hexToColor(fueltechColour(s.fueltech)),
-          transparent: true, opacity: 0.85,
+          color: colour, transparent: true, opacity: 0.62,
+          blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide,
         }),
       );
       mesh.position.set(x, 0, z);
       mesh.userData = { id: s.station_id, capacity: s.capacity_mw };
       stationGroup.add(mesh);
+
+      // A disc on the ground under each column: it anchors the station to a
+      // place even when its output is zero and the column has nothing to draw.
+      const foot = new THREE.Mesh(
+        new THREE.CircleGeometry(r * 2.6, 12),
+        new THREE.MeshBasicMaterial({
+          color: colour, transparent: true, opacity: 0.16,
+          blending: THREE.AdditiveBlending, depthWrite: false,
+        }),
+      );
+      foot.rotation.x = -Math.PI / 2;
+      foot.position.set(x, 0.01, z);
+      stationGroup.add(foot);
+
+      mesh.userData.foot = foot;
       stationMeshes.push(mesh);
     }
   }
@@ -228,15 +251,23 @@ export function mount(root, ctx) {
   }
   buildArcs();
 
-  // Travelling pulses: one sprite per arc, position driven by flow direction.
-  const pulseGeom = new THREE.SphereGeometry(0.22, 10, 10);
-  const pulses = arcs.map((a) => {
-    const m = new THREE.Mesh(pulseGeom, new THREE.MeshBasicMaterial({
-      color: 0xd6c6ff, transparent: true, opacity: 0,
-    }));
-    arcGroup.add(m);
-    return { arc: a, mesh: m, phase: Math.random() };
-  });
+  // Three pulses per arc, evenly spaced. One dot crawling a long curve reads as
+  // a stray highlight; a train of them reads as flow, and their spacing carries
+  // the rate without needing a number.
+  const PULSES_PER_ARC = 3;
+  const pulseGeom = new THREE.SphereGeometry(0.17, 10, 10);
+  const pulses = [];
+  for (const a of arcs) {
+    for (let k = 0; k < PULSES_PER_ARC; k++) {
+      const m = new THREE.Mesh(pulseGeom, new THREE.MeshBasicMaterial({
+        color: 0xe0d4ff, transparent: true, opacity: 0,
+        blending: THREE.AdditiveBlending, depthWrite: false,
+      }));
+      arcGroup.add(m);
+      pulses.push({ arc: a, mesh: m, offset: k / PULSES_PER_ARC });
+    }
+  }
+  let flowPhase = 0;
 
   // ---- interaction -------------------------------------------------------
   let dragging = false;
@@ -245,14 +276,14 @@ export function mount(root, ctx) {
   const onDown = (e) => { dragging = true; lastX = e.clientX; lastY = e.clientY; };
   const onMove = (e) => {
     if (!dragging) return;
-    view.angle -= (e.clientX - lastX) * 0.006;
-    view.tilt = Math.max(0.25, Math.min(1.45, view.tilt + (e.clientY - lastY) * 0.005));
+    target.angle -= (e.clientX - lastX) * 0.006;
+    target.tilt = Math.max(0.3, Math.min(1.5, target.tilt + (e.clientY - lastY) * 0.005));
     lastX = e.clientX; lastY = e.clientY;
   };
   const onUp = () => { dragging = false; };
   const onWheel = (e) => {
     e.preventDefault();
-    view.distance = Math.max(34, Math.min(150, view.distance + e.deltaY * 0.05));
+    target.distance = Math.max(34, Math.min(140, target.distance + e.deltaY * 0.05));
   };
   renderer.domElement.addEventListener('pointerdown', onDown);
   addEventListener('pointermove', onMove);
@@ -280,6 +311,10 @@ export function mount(root, ctx) {
   function frame(now) {
     const dt = Math.min((now - last) / 1000, 0.1);
     last = now;
+    const ease = 1 - Math.exp(-dt * 9);
+    view.angle += (target.angle - view.angle) * ease;
+    view.tilt += (target.tilt - view.tilt) * ease;
+    view.distance += (target.distance - view.distance) * ease;
     applyCamera();
 
     // Demand sets each region's floor glow.
@@ -296,25 +331,27 @@ export function mount(root, ctx) {
       const frac = Number.isFinite(mw) && mesh.userData.capacity > 0
         ? Math.max(0, Math.min(mw / mesh.userData.capacity, 1))
         : 0;
-      const height = 0.2 + frac * 5.2;
+      const height = 0.15 + frac * 5.4;
       mesh.scale.y = height;
       mesh.position.y = height / 2;
-      mesh.material.opacity = 0.32 + frac * 0.62;
+      mesh.material.opacity = 0.2 + frac * 0.6;
+      if (mesh.userData.foot) mesh.userData.foot.material.opacity = 0.1 + frac * 0.35;
     }
 
     // Flow drives arc brightness and the pulse that travels along it.
+    flowPhase = (flowPhase + dt * 0.22) % 1;
     for (const p of pulses) {
       const mw = state.flow[p.arc.id] ?? 0;
       const mag = Math.min(Math.abs(mw) / 900, 1);
-      p.arc.line.material.opacity = 0.22 + mag * 0.7;
+      p.arc.line.material.opacity = 0.14 + mag * 0.6;
       if (mag < 0.02) { p.mesh.material.opacity = 0; continue; }
-      p.phase = (p.phase + dt * (0.16 + mag * 0.5)) % 1;
+      // Speed scales with flow, so a heavily loaded link visibly runs faster.
+      const along = (flowPhase * (0.6 + mag * 2.2) + p.offset) % 1;
       // Negative flow runs the other way along the same curve.
-      const t = mw >= 0 ? p.phase : 1 - p.phase;
-      const at = p.arc.curve.getPoint(t);
-      p.mesh.position.copy(at);
-      p.mesh.scale.setScalar(0.5 + mag);
-      p.mesh.material.opacity = 0.25 + mag * 0.7;
+      p.mesh.position.copy(p.arc.curve.getPoint(mw >= 0 ? along : 1 - along));
+      p.mesh.scale.setScalar(0.55 + mag * 0.9);
+      // Fade at both ends so pulses arrive and depart rather than blinking out.
+      p.mesh.material.opacity = (0.2 + mag * 0.7) * Math.sin(along * Math.PI);
     }
 
     renderer.render(scene, camera);
@@ -322,11 +359,22 @@ export function mount(root, ctx) {
   }
   raf = requestAnimationFrame(frame);
 
+  // Fuel keys actually present on the map, so the legend never advertises a
+  // colour the reader cannot find.
+  function renderFuelKey(rows) {
+    const host = root.querySelector('#map-fuels');
+    if (!host) return;
+    const present = [...new Set(rows.map((r) => r.fueltech))].filter(Boolean).sort();
+    host.innerHTML = present.map((ft) =>
+      `<span class="ft"><span class="ft-swatch" style="background:${fueltechColour(ft)}"></span>` +
+      `<span class="ft-code">${FUELTECH_CODE[ft] ?? ft}</span></span>`).join('');
+  }
+
   function renderLegend() {
     if (!legend) return;
     const rows = Object.entries(state.demand)
       .sort((a, b) => b[1] - a[1])
-      .map(([r, mw]) => `<tr><td>${r}</td><td>${(mw / 1000).toFixed(2)}</td></tr>`)
+      .map(([r, mw]) => `<tr><td>${r === 'SWIS' ? 'SWIS *' : r}</td><td>${(mw / 1000).toFixed(2)}</td></tr>`)
       .join('');
     const links = arcs
       .map((a) => {
@@ -337,7 +385,8 @@ export function mount(root, ctx) {
       .join('');
     legend.innerHTML =
       `<table><thead><tr><th>Region</th><th>Demand GW</th></tr></thead><tbody>${rows}` +
-      `</tbody></table><table><thead><tr><th>Flowing</th><th>MW</th></tr></thead><tbody>${links}</tbody></table>`;
+      `</tbody></table><table><thead><tr><th>Flowing</th><th>MW</th></tr></thead><tbody>${links}</tbody></table>` +
+      '<p class="map-foot">* Western Australia, a separate grid — never added to the NEM total.</p>';
   }
 
   return {
@@ -346,6 +395,7 @@ export function mount(root, ctx) {
       const rows = appState.stationRows ?? [];
       if (rows.length && stationMeshes.length !== rows.filter((s) => Number.isFinite(s.lat)).length) {
         buildStations(rows);
+        renderFuelKey(rows);
       }
       state.output = appState.stationOutput ?? state.output;
 
