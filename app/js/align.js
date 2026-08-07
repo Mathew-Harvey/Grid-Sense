@@ -41,6 +41,11 @@ export const OBSERVED_AT_SHIFT = {
   AVAILABILITY: 0,
   SEMIDISPATCHCAP: 0,
   ENERGY_STORAGE: 0,
+  // Western Australia reports energy over the interval, not a snapshot inside
+  // it. An interval average is not attributable to either edge: the honest
+  // instant is the middle, which is also where it lines up with a NEM start-of-
+  // interval snapshot to within half a step rather than a full one.
+  WEM_QUANTITY: -2.5,
 };
 
 /**

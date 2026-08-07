@@ -153,3 +153,46 @@ and their reasons:
   7:30 am Sat 18 Jul…" keeps the one fact newcomers most reliably get wrong —
   that this is recorded history, not live telemetry — in every sentence the
   page says about itself.
+
+## Western Australia
+
+Added after a reader asked where WA was. The decisions:
+
+- **Its own feed, the same store.** WEM dispatch is fetched by
+  `backfill-wem.js` into `data/wem-dispatch/`, then folded into the same
+  per-station IndexedDB records the NEM uses, so the replay does not know or
+  care which grid a station belongs to.
+- **The facility join is inferred, narrowly, and its rate is recorded.** No
+  crosswalk exists between Open Electricity's station codes and AEMO's WEM
+  facility codes, so a station matches when its code appears as a run of whole
+  underscore-delimited tokens in the facility code. 70 of 76 facilities join,
+  covering 97.3% of SWIS capacity; the six that do not are named in
+  `registry.json` rather than force-fitted.
+- **Storage is not part of its host.** Open Electricity has no entry for most
+  co-located batteries, so a code join sweeps them into whatever station shares
+  the name. They are excluded from non-storage hosts, and the exclusions are
+  listed.
+- **SWIS is listed beside the NEM regions, never summed with them.** They are
+  physically separate grids; a single "national total" across them would be a
+  number describing nothing.
+- **WA is scored without a curtailment mask, and says so.** The WEM feed
+  publishes no UIGF and no semi-dispatch cap, so WA has neither an
+  available-energy target nor a way to exclude constrained intervals. The data
+  quality strip states it rather than leaving the asymmetry implicit.
+
+## Colour: what the palette means
+
+The state colours were near-white actual against near-white forecast, separated
+only by a dash. A reader reported it as unreadable, which it was.
+
+The rule now has one axis: **violet is a number somebody computed; a fueltech
+hue — or white, for a fleet total — is something that physically happened.** The
+forecast, its uncertainty band and the market's dispatch target are violet. The
+actual output never is. Violet because it is the one region of the wheel no
+fueltech occupies, so it cannot be misread as a fuel.
+
+On the station chart the same plant's actual and could-have-made share its
+fueltech hue and separate on weight and dash, because they are one machine under
+two conditions rather than two quantities. The expert ribbon stays inside the
+violet family — it is six computed numbers — but at low luminance, because the
+conviction band above it is where the boldness is meant to be spent.

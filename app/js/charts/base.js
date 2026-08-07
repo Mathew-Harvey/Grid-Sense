@@ -144,6 +144,11 @@ export function autoResize(plot, el) {
 // ribbon reads bottom-to-top as increasing model commitment. Deliberately a
 // single ramp: hue is reserved for fueltech, and six competing colours here
 // would claim a meaning these series do not have.
+// Six experts stacked in one ribbon, so the six bands must be told apart at a
+// glance — the previous ramp walked six near-identical slate greys and could
+// not be. It stays inside the violet "computed number" family rather than
+// borrowing fueltech hues, and separates on lightness and chroma together,
+// which survives both a small ribbon and colour-vision deficiency.
 export const EXPERT_RAMP = [
-  '#2a343a', '#33424a', '#3d5059', '#476069', '#516f78', '#5b7e88',
+  '#241d3d', '#342a58', '#453873', '#57478f', '#6a57a8', '#7e69bd',
 ];

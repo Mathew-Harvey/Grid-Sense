@@ -8,7 +8,7 @@
 // glossary; story templates carry {placeholders} the app fills at render time.
 
 export const DECK = {
-  "strap": "Watch a forecast model learn 21 days of Australia's eastern power grid at high speed — and mark its own homework as it goes.",
+  "strap": "Watch a forecast model learn 21 days of Australia's power grids at high speed — and mark its own homework as it goes.",
   "tabs": {
     "aggregate": "Whole market",
     "station": "One station",
@@ -21,7 +21,7 @@ export const DECK = {
     },
     "market": {
       "plainTitle": "Actual versus predicted power",
-      "caption": "The white line is what all tracked stations actually made; the dashed line is the model's hour-ahead [[forecast|forecast]]. The [[band|grey band]] is its uncertainty — a courier's 'between 2 and 4 pm' window. That width is a promise, and the Cover 90 column beside this chart scores whether it was kept. Below sit the [[expert|experts]] it trusts, the wholesale [[price|price]] and running [[revenue|revenue]]."
+      "caption": "The white line is what all tracked stations actually made; the dashed line is the model's hour-ahead [[forecast|forecast]]. The [[band|violet band]] is its uncertainty — a courier's 'between 2 and 4 pm' window. That width is a promise, and the Cover 90 column beside this chart scores whether it was kept. Below sit the [[expert|experts]] it trusts, the wholesale [[price|price]] and running [[revenue|revenue]]."
     },
     "fuelmix": {
       "plainTitle": "What's making the power",
@@ -29,7 +29,7 @@ export const DECK = {
     },
     "regions": {
       "plainTitle": "State by state",
-      "caption": "One row per [[region|region]] of the National Electricity Market, which covers the eastern and southern states. Western Australia and the Northern Territory are absent because they are not connected to it — separate grids, separate markets. Each row is how many [[gw|gigawatts]] that region's tracked stations are making right now in the [[replay|replay]], and its share of the total."
+      "caption": "One row per [[region|region]]. Five belong to the National Electricity Market on the eastern seaboard; SWIS is Western Australia, a completely separate grid with its own market — no wire joins them, which is why it is listed apart rather than added in. Each row is how many [[gw|gigawatts]] that region's tracked stations are making right now in the [[replay|replay]], and its share."
     },
     "quality": {
       "plainTitle": "Where the data ends",
@@ -41,7 +41,7 @@ export const DECK = {
     },
     "powercurve": {
       "plainTitle": "Wind in, power out",
-      "caption": "Each grey dot is five minutes of real life: wind speed across, power out up. The white S-curve is the machine's fitted [[powercurve|power curve]] — nothing in light air, a steep climb, then flat at full power. Red crosses were [[curtailment|held back on purpose]], so the fit ignores them."
+      "caption": "Each grey dot is five minutes of real life: wind speed across, power out up. The violet S-curve is the machine's fitted [[powercurve|power curve]] — nothing in light air, a steep climb, then flat at full power. Red crosses were [[curtailment|held back on purpose]], so the fit ignores them."
     },
     "lag": {
       "plainTitle": "Does weather arrive first",
@@ -155,7 +155,7 @@ export const DECK = {
     },
     "region": {
       "name": "Region",
-      "plain": "One of the five zones of the National Electricity Market: New South Wales (which includes the ACT), Queensland, South Australia, Tasmania and Victoria. Western Australia and the Northern Territory are too far away to connect, so they run their own grids and are not part of this market."
+      "plain": "A pricing zone of one grid. Five are National Electricity Market zones on the east coast — New South Wales (with the ACT), Queensland, South Australia, Tasmania, Victoria. SWIS is the South West Interconnected System around Perth: a separate grid, too far to connect, with its own market."
     },
     "price": {
       "name": "Wholesale price",

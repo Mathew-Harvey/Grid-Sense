@@ -43,9 +43,23 @@
 
   /* State. Not fueltech, not chrome: what a value IS rather than what fuel
    * produced it. */
-  --state-predicted: #b8c7d0;
-  --state-band: #b8c7d033;
-  --state-band-ghost: #b8c7d014;
+  /* States own hues, the same way fueltechs do — the palette rule is that a
+   * colour always means something, not that only fuels get colour.
+   *
+   * The scheme is one distinction: violet is a number somebody computed, the
+   * fueltech hue (or white, for a fleet total) is a thing that physically
+   * happened. So the forecast, its band and the market's dispatch target are
+   * all violet, and the actual output never is. Violet because it is the one
+   * region of the wheel no fueltech occupies — coal grey and umber, gas amber,
+   * hydro blue, wind teal, solar yellow, battery green, bioenergy olive — so it
+   * cannot be mistaken for a fuel at a glance.
+   *
+   * It replaces a near-white forecast against a near-white actual, separated
+   * only by a dash pattern. That was unreadable, which a reader reported in
+   * exactly those words: white, light grey and dashed are too alike. */
+  --state-predicted: #a98bff;
+  --state-band: #a98bff3d;
+  --state-band-ghost: #a98bff17;
   --state-curtailed: #d0563f;
   --state-suspect: #b0526e;
   --state-now: #e4ecf0;

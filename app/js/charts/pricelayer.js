@@ -128,7 +128,7 @@ export function createRevenueRibbon(el) {
     ...base,
     series: [
       {},
-      { label: 'cumulative revenue', stroke: COLOURS.predicted, width: 1.2, fill: COLOURS.band },
+      { label: 'cumulative revenue', stroke: COLOURS.dim, width: 1.2, fill: 'rgba(140,160,171,0.18)' },
     ],
     axes: [
       { ...base.axes[0], show: false },

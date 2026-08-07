@@ -113,39 +113,66 @@ live-mode curtailment figures are always one day behind.
 
 ---
 
-## F4 — WEM has no usable history: 90-day replay is NEM-only
+## F4 — RESOLVED, and it was my error: WEM has three years of history
 
-`facilityScada/previous/` is **empty** (0 files). `facilityScada/current/`
-holds a single trading day (`SCADA_2026-08-05.json`, 08:00–07:55 AWST,
-288 intervals, 76 facilities).
+**This entry was wrong, and Western Australia was left out of the dashboard
+because of it.** It originally read "WEM has no usable history", on the basis
+that `facilityScada/previous/` was empty.
 
-There is therefore no 90-day WEM backfill available from this source, so the
-replay-training centrepiece is **NEM-only**.
+That directory is not empty and, on the evidence, never was. It holds one zip
+per trading day from **29 September 2023** — 1,041 files at the time of writing,
+just under three years. What holds a single day is `facilityScada/current/`,
+which is the day in progress; the original check must have read that one and
+generalised. The conclusion drawn from it, that the replay could only ever be
+NEM-only, then went unquestioned through every later pass.
 
-Taken under **§15.3**, which explicitly permits this: "A working NEM-only
-dashboard beats a half-working national one." Recorded rather than silently
-shipped smaller, per §15.
+The correction, measured rather than asserted:
 
-**Correction, made after a reader asked "where is WA?".** This entry used to
-claim "WEM is ingested live and gets the correlation and live-forecast views."
-That is not true of the shipped app and should not have been written in the
-present tense: `harvester/fetch-wem.js` exists and works, but nothing schedules
-it, no WEM data reaches the browser, and there is no live mode at all — the
-dashboard trains on the window the harvester built at deploy time. The app is
-NEM-only, without qualification.
+| | |
+|---|---|
+| Archive span | 2023-09-29 to 2026-08-05, 1,041 daily files |
+| Facilities in a day's feed | 76 |
+| Joined to a registry station | 70, onto 48 stations |
+| Registered capacity covered | 97.3% of the SWIS |
+| Stations now modelled | 37 |
 
-The reader's question also exposed the gap that produced it: the region table
-listed five NEM regions with no word about why two states were missing, and
-the masthead has always carried a WEM clock, which invites exactly the
-expectation the data never meets. The plain-English caption and glossary now
-state that Western Australia and the Northern Territory run separate grids and
-are not part of this market. The clock is left in place — it is orientation for
-an Australian reader, not a claim of coverage — but it is the remaining thing
-on the page that hints at WEM.
+**The join had to be inferred.** Open Electricity names a WEM station by a short
+code (`COLLIE`); AEMO's SCADA reports facilities (`COLLIE_G1`, `BW1_BLUEWATERS_G2`).
+No crosswalk is published, so `wem-registry.js` matches a station whose code
+appears as a run of *whole* underscore-delimited tokens inside the facility
+code — narrow enough that it cannot join by coincidence, wide enough to survive
+an owner prefix. Substring matching would have been easier and would have joined
+unrelated plant.
 
-**Status:** accepted limitation, now stated in the interface rather than only in
-this file. Sourcing WEM history elsewhere (a WEM equivalent of the MMSDM
-archive) remains uninvestigated.
+Two faults the first join produced, both now fixed and both worth recording
+because they are the shape of error this kind of inference makes:
+
+- **Storage swept into its host.** Open Electricity has no entry for Collie's
+  battery, so `COLLIE_BESS2` and three `COLLIE_ESR*` facilities folded into a
+  318 MW coal station and made it a 907 MW one. Storage is excluded from a host
+  that is not itself registered as storage, and the six exclusions are listed in
+  `registry.json`.
+- **A nameplate that has not kept up.** Greenough River reports 35 MW against a
+  registered 10 MW. That is Open Electricity being stale, not a bad join, and it
+  is caught by the same over-nameplate rule the NEM side uses: those intervals
+  are marked `suspect` and stay out of every fit.
+
+**What WA still cannot have.** The WEM feed publishes no available-energy figure
+and no curtailment flag — no UIGF, no semi-dispatch cap. So WA stations are
+forecast against actual output rather than available energy, and they get none
+of the curtailment masking the eastern states get. That is stated in the data
+quality strip rather than left for the reader to discover.
+
+Units are the F2 trap: `quantity` is MWh over the interval, converted once in
+`wemQuantityToMw`. Interval stamps are AWST with an explicit offset and refer to
+the interval's end, but the value is an average over it, so `WEM_QUANTITY`
+carries a −2.5 minute shift in `align.js` — the middle of the window it
+describes, rather than either edge.
+
+**Status:** resolved. WA is in the registry, the backfill, the replay and the
+region table. The lesson is not about WEM: a limitation recorded once was
+believed for the rest of the build without anyone re-checking the directory it
+rested on.
 
 ---
 

@@ -35,7 +35,7 @@ export const DEFAULT_DAYS = 21;
 
 // Bumped when the packing or the derived weather features change, so a stale
 // IndexedDB is rebuilt rather than read with the wrong columns in it.
-const CACHE_VERSION = 3;
+const CACHE_VERSION = 4;
 
 const safeFileName = (id) => encodeURIComponent(id).replace(/\*/g, '%2A');
 const isoDay = (ms) => new Date(ms).toISOString().slice(0, 10);
@@ -294,6 +294,10 @@ export async function loadAll({ days = DEFAULT_DAYS, force = false, onProgress =
     .sort((a, b) => b.capacity_mw - a.capacity_mw);
   const byId = new Map(stations.map((s) => [s.station_id, s]));
 
+  // WA stations carry no DUIDs — the eastern registration tables have no rows
+  // for them — so they are keyed by station code from their own feed instead.
+  const swisIds = new Set(stations.filter((s) => s.region === 'SWIS').map((s) => s.station_id));
+
   const duidToStation = new Map();
   for (const s of stations) {
     for (const d of s.duids) {
@@ -383,6 +387,60 @@ export async function loadAll({ days = DEFAULT_DAYS, force = false, onProgress =
     await yieldToPaint();
   }
   report('dispatch', `${loadedDays.length} days of dispatch`, wanted.length, wanted.length);
+
+  // ---- Western Australia -------------------------------------------------
+  // A separate grid, a separate market and a separate feed, folded into the
+  // same per-station store so the replay does not care which side of the
+  // continent a station is on. Two things it cannot carry: WEM publishes no
+  // available-energy figure and no curtailment flag, so `uigf_mw` is null and
+  // the mask is genuinely unknown rather than false.
+  let wemDays = 0;
+  let wemStations = 0;
+  if (swisIds.size > 0) {
+    for (let i = 0; i < wanted.length; i++) {
+      const day = wanted[i];
+      if (haveDays.has(day.iso)) continue;
+      report('dispatch', `Western Australia ${day.iso}`, i, wanted.length);
+
+      let file;
+      try {
+        file = await fetchJson(`${DATA}/wem-dispatch/${day.iso}.json`);
+      } catch {
+        continue;
+      }
+
+      const byStation = new Map();
+      for (const r of file.rows) {
+        if (!swisIds.has(r.station_id)) continue;
+        let list = byStation.get(r.station_id);
+        if (!list) byStation.set(r.station_id, (list = []));
+        list.push({
+          observed_at: observedAt(r.settlement_ms, 'WEM_QUANTITY'),
+          output_mw: r.mw,
+          available_mw: null,
+          cleared_mw: null,
+          uigf_mw: null,
+          curtailed_mw: 0,
+          capped: false,
+          quality: r.quality ?? 'ok',
+          units_online: r.facilities ?? 0,
+        });
+      }
+      for (const [stationId, observations] of byStation) {
+        observations.sort((a, b) => a.observed_at - b.observed_at);
+        await putStationDay(stationId, day.ms, packDay(observations));
+      }
+      if (byStation.size > 0) { wemDays++; wemStations = Math.max(wemStations, byStation.size); }
+      await yieldToPaint();
+    }
+
+    notes.push({
+      source: 'wem',
+      message: wemDays > 0
+        ? `Western Australia: ${wemStations} stations over ${wemDays} days. The WEM feed publishes no available-energy figure and no curtailment flag, so WA stations are scored without the curtailment mask the eastern states get.`
+        : `No Western Australian dispatch under ${DATA}/wem-dispatch/. Run harvester/backfill-wem.js to include the SWIS.`,
+    });
+  }
 
   // ---- weather ----------------------------------------------------------
   const weatherDays = new Set();

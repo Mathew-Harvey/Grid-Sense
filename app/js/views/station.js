@@ -60,9 +60,12 @@ function createStationSeries(el) {
     ...base,
     series: [
       {},
+      // Actual and could-have are the same physical plant, so they share its
+      // fueltech hue and separate on weight and dash; the dispatch target is a
+      // number the market computed, so it takes the violet the forecast uses.
       { label: 'actual', stroke: COLOURS.text, width: 1.6, spanGaps: false },
-      { label: 'could have (UIGF)', stroke: COLOURS.dim, width: 1.1, dash: [5, 3], spanGaps: false },
-      { label: 'dispatch target', stroke: COLOURS.predicted, width: 0.9, spanGaps: false },
+      { label: 'could have (UIGF)', stroke: COLOURS.dim, width: 1.2, dash: [5, 3], spanGaps: false },
+      { label: 'dispatch target', stroke: COLOURS.predicted, width: 1, dash: [2, 3], spanGaps: false },
     ],
     scales: { y: { range: (u, min, max) => [0, Math.max(max, 1) * 1.05] } },
     axes: [
@@ -91,7 +94,14 @@ function createStationSeries(el) {
 
   return {
     plot,
-    setColour(ft) { plot.series[1].stroke = () => fueltechColour(ft); },
+    setColour(ft) {
+      const hue = fueltechColour(ft);
+      plot.series[1].stroke = () => hue;
+      // The same hue carried at reduced strength: "this plant, unrealised".
+      // A separate colour here would read as a third quantity rather than as
+      // the same one under a different condition.
+      plot.series[2].stroke = () => (/^#[0-9a-f]{6}$/i.test(hue) ? `${hue}88` : COLOURS.dim);
+    },
     update({ t, actual, uigf, cleared, cappedSpans }) {
       capped.spans = cappedSpans;
       plot.setData([t, actual, uigf, cleared]);

@@ -1106,7 +1106,11 @@
         "location": "Open Electricity facilities GeoJSON (CC BY-NC 4.0)",
         "retrieved_at": "2026-08-06T13:37:06.830Z"
       },
-      "modelled": false
+      "modelled": true,
+      "wem_facilities": [
+        "MUJA_G7",
+        "MUJA_G8"
+      ]
     },
     {
       "station_id": "SNOWY2",
@@ -1163,7 +1167,18 @@
         "location": "Open Electricity facilities GeoJSON (CC BY-NC 4.0)",
         "retrieved_at": "2026-08-06T13:37:06.830Z"
       },
-      "modelled": false
+      "modelled": true,
+      "wem_facilities": [
+        "PINJAR_GT1",
+        "PINJAR_GT10",
+        "PINJAR_GT11",
+        "PINJAR_GT2",
+        "PINJAR_GT3",
+        "PINJAR_GT4",
+        "PINJAR_GT5",
+        "PINJAR_GT7",
+        "PINJAR_GT9"
+      ]
     },
     {
       "station_id": "MORTLK",
@@ -1663,7 +1678,11 @@
         "location": "Open Electricity facilities GeoJSON (CC BY-NC 4.0)",
         "retrieved_at": "2026-08-06T13:37:06.830Z"
       },
-      "modelled": false
+      "modelled": true,
+      "wem_facilities": [
+        "BW1_BLUEWATERS_G2",
+        "BW2_BLUEWATERS_G1"
+      ]
     },
     {
       "station_id": "MACARTH",
@@ -1755,7 +1774,10 @@
         "location": "Open Electricity facilities GeoJSON (CC BY-NC 4.0)",
         "retrieved_at": "2026-08-06T13:37:06.830Z"
       },
-      "modelled": false
+      "modelled": true,
+      "wem_facilities": [
+        "ALCOA_WGP"
+      ]
     },
     {
       "station_id": "NEWENGSF",
@@ -1882,7 +1904,10 @@
         "location": "Open Electricity facilities GeoJSON (CC BY-NC 4.0)",
         "retrieved_at": "2026-08-06T13:37:06.830Z"
       },
-      "modelled": false
+      "modelled": true,
+      "wem_facilities": [
+        "NEWGEN_NEERABUP_GT1"
+      ]
     },
     {
       "station_id": "DUNDWF",
@@ -1945,7 +1970,10 @@
         "location": "Open Electricity facilities GeoJSON (CC BY-NC 4.0)",
         "retrieved_at": "2026-08-06T13:37:06.830Z"
       },
-      "modelled": false
+      "modelled": true,
+      "wem_facilities": [
+        "NEWGEN_KWINANA_CCG1"
+      ]
     },
     {
       "station_id": "BANGOWF",
@@ -2054,7 +2082,10 @@
         "location": "Open Electricity facilities GeoJSON (CC BY-NC 4.0)",
         "retrieved_at": "2026-08-06T13:37:06.830Z"
       },
-      "modelled": false
+      "modelled": true,
+      "wem_facilities": [
+        "COLLIE_G1"
+      ]
     },
     {
       "station_id": "LNGS",
@@ -2117,7 +2148,11 @@
         "location": "Open Electricity facilities GeoJSON (CC BY-NC 4.0)",
         "retrieved_at": "2026-08-06T13:37:06.830Z"
       },
-      "modelled": false
+      "modelled": true,
+      "wem_facilities": [
+        "KEMERTON_GT11",
+        "KEMERTON_GT12"
+      ]
     },
     {
       "station_id": "PAREP",
@@ -2321,7 +2356,12 @@
         "location": "Open Electricity facilities GeoJSON (CC BY-NC 4.0)",
         "retrieved_at": "2026-08-06T13:37:06.830Z"
       },
-      "modelled": false
+      "modelled": true,
+      "wem_facilities": [
+        "KWINANA_GT2",
+        "KWINANA_GT3",
+        "PHOENIX_KWINANA_WTE_G1"
+      ]
     },
     {
       "station_id": "BRYB1WF",
@@ -2372,7 +2412,11 @@
         "location": "Open Electricity facilities GeoJSON (CC BY-NC 4.0)",
         "retrieved_at": "2026-08-06T13:37:06.830Z"
       },
-      "modelled": false
+      "modelled": true,
+      "wem_facilities": [
+        "ALINTA_PNJ_U1",
+        "ALINTA_PNJ_U2"
+      ]
     },
     {
       "station_id": "OAKEY",
@@ -2528,7 +2572,10 @@
         "location": "Open Electricity facilities GeoJSON (CC BY-NC 4.0)",
         "retrieved_at": "2026-08-06T13:37:06.830Z"
       },
-      "modelled": false
+      "modelled": true,
+      "wem_facilities": [
+        "COCKBURN_CCG1"
+      ]
     },
     {
       "station_id": "AVLSF",
@@ -2964,7 +3011,10 @@
         "location": "Open Electricity facilities GeoJSON (CC BY-NC 4.0)",
         "retrieved_at": "2026-08-06T13:37:06.830Z"
       },
-      "modelled": true
+      "modelled": true,
+      "wem_facilities": [
+        "YANDIN_WF1"
+      ]
     },
     {
       "station_id": "BARKIPS",
@@ -3044,7 +3094,10 @@
         "location": "Open Electricity facilities GeoJSON (CC BY-NC 4.0)",
         "retrieved_at": "2026-08-06T13:37:06.830Z"
       },
-      "modelled": true
+      "modelled": true,
+      "wem_facilities": [
+        "INVESTEC_COLLGAR_WF1"
+      ]
     },
     {
       "station_id": "JEERA",
@@ -3521,7 +3574,10 @@
         "location": "Open Electricity facilities GeoJSON (CC BY-NC 4.0)",
         "retrieved_at": "2026-08-06T13:37:06.830Z"
       },
-      "modelled": true
+      "modelled": true,
+      "wem_facilities": [
+        "WARRADARGE_WF1"
+      ]
     },
     {
       "station_id": "GULLRGWF",
@@ -4870,7 +4926,10 @@
         "location": "Open Electricity facilities GeoJSON (CC BY-NC 4.0)",
         "retrieved_at": "2026-08-06T13:37:06.830Z"
       },
-      "modelled": false
+      "modelled": true,
+      "wem_facilities": [
+        "BADGINGARRA_WF1"
+      ]
     },
     {
       "station_id": "RRSF",
@@ -5189,7 +5248,10 @@
         "location": "Open Electricity facilities GeoJSON (CC BY-NC 4.0)",
         "retrieved_at": "2026-08-06T13:37:06.830Z"
       },
-      "modelled": false
+      "modelled": true,
+      "wem_facilities": [
+        "TIWEST_COG1"
+      ]
     },
     {
       "station_id": "GANGARRI",
@@ -5327,7 +5389,11 @@
         "location": "Open Electricity facilities GeoJSON (CC BY-NC 4.0)",
         "retrieved_at": "2026-08-06T13:37:06.830Z"
       },
-      "modelled": false
+      "modelled": true,
+      "wem_facilities": [
+        "MUNGARRA_GT1",
+        "MUNGARRA_GT3"
+      ]
     },
     {
       "station_id": "PERTHENERGY_KWINANA",
@@ -5349,7 +5415,10 @@
         "location": "Open Electricity facilities GeoJSON (CC BY-NC 4.0)",
         "retrieved_at": "2026-08-06T13:37:06.830Z"
       },
-      "modelled": false
+      "modelled": true,
+      "wem_facilities": [
+        "PERTHENERGY_KWINANA_GT1"
+      ]
     },
     {
       "station_id": "MINTARO",
@@ -5650,7 +5719,10 @@
         "location": "Open Electricity facilities GeoJSON (CC BY-NC 4.0)",
         "retrieved_at": "2026-08-06T13:37:06.830Z"
       },
-      "modelled": false
+      "modelled": true,
+      "wem_facilities": [
+        "PRK_AG"
+      ]
     },
     {
       "station_id": "TBSF",
@@ -6044,7 +6116,8 @@
         "location": "Open Electricity facilities GeoJSON (CC BY-NC 4.0)",
         "retrieved_at": "2026-08-06T13:37:06.830Z"
       },
-      "modelled": false
+      "modelled": false,
+      "wem_facilities": []
     },
     {
       "station_id": "MERSOLAR",
@@ -6066,7 +6139,10 @@
         "location": "Open Electricity facilities GeoJSON (CC BY-NC 4.0)",
         "retrieved_at": "2026-08-06T13:37:06.830Z"
       },
-      "modelled": false
+      "modelled": true,
+      "wem_facilities": [
+        "MERSOLAR_PV1"
+      ]
     },
     {
       "station_id": "MOUSF",
@@ -6315,7 +6391,10 @@
         "location": "Open Electricity facilities GeoJSON (CC BY-NC 4.0)",
         "retrieved_at": "2026-08-06T13:37:06.830Z"
       },
-      "modelled": false
+      "modelled": true,
+      "wem_facilities": [
+        "NAMKKN_MERR_SG1"
+      ]
     },
     {
       "station_id": "DEIBDL",
@@ -6518,7 +6597,10 @@
         "location": "Open Electricity facilities GeoJSON (CC BY-NC 4.0)",
         "retrieved_at": "2026-08-06T13:37:06.830Z"
       },
-      "modelled": false
+      "modelled": true,
+      "wem_facilities": [
+        "ALINTA_WWF"
+      ]
     },
     {
       "station_id": "SNUG",
@@ -6994,7 +7076,10 @@
         "location": "Open Electricity facilities GeoJSON (CC BY-NC 4.0)",
         "retrieved_at": "2026-08-06T13:37:06.830Z"
       },
-      "modelled": false
+      "modelled": true,
+      "wem_facilities": [
+        "EDWFMAN_WF1"
+      ]
     },
     {
       "station_id": "CROWLWF",
@@ -7132,7 +7217,10 @@
         "location": "Open Electricity facilities GeoJSON (CC BY-NC 4.0)",
         "retrieved_at": "2026-08-06T13:37:06.830Z"
       },
-      "modelled": false
+      "modelled": true,
+      "wem_facilities": [
+        "FLATROCKS_WF1"
+      ]
     },
     {
       "station_id": "NUMURKSF",
@@ -7468,7 +7556,11 @@
         "location": "Open Electricity facilities GeoJSON (CC BY-NC 4.0)",
         "retrieved_at": "2026-08-06T13:37:06.830Z"
       },
-      "modelled": false
+      "modelled": true,
+      "wem_facilities": [
+        "WEST_KALGOORLIE_GT2",
+        "WEST_KALGOORLIE_GT3"
+      ]
     },
     {
       "station_id": "MEADOWBK",
@@ -8247,7 +8339,10 @@
         "location": "Open Electricity facilities GeoJSON (CC BY-NC 4.0)",
         "retrieved_at": "2026-08-06T13:37:06.830Z"
       },
-      "modelled": false
+      "modelled": true,
+      "wem_facilities": [
+        "MWF_MUMBIDA_WF1"
+      ]
     },
     {
       "station_id": "SALTCRK",
@@ -8920,7 +9015,10 @@
         "location": "Open Electricity facilities GeoJSON (CC BY-NC 4.0)",
         "retrieved_at": "2026-08-06T13:37:06.830Z"
       },
-      "modelled": false
+      "modelled": true,
+      "wem_facilities": [
+        "STHRNCRS_EG"
+      ]
     },
     {
       "station_id": "TOWER",
@@ -8971,7 +9069,8 @@
         "location": "Open Electricity facilities GeoJSON (CC BY-NC 4.0)",
         "retrieved_at": "2026-08-06T13:37:06.830Z"
       },
-      "modelled": false
+      "modelled": false,
+      "wem_facilities": []
     },
     {
       "station_id": "LKBONNY3",
@@ -10206,7 +10305,10 @@
         "location": "Open Electricity facilities GeoJSON (CC BY-NC 4.0)",
         "retrieved_at": "2026-08-06T13:37:06.830Z"
       },
-      "modelled": false
+      "modelled": true,
+      "wem_facilities": [
+        "ALBANY_WF1"
+      ]
     },
     {
       "station_id": "BOLIVPS",
@@ -10856,7 +10958,10 @@
         "location": "Open Electricity facilities GeoJSON (CC BY-NC 4.0)",
         "retrieved_at": "2026-08-06T13:37:06.830Z"
       },
-      "modelled": false
+      "modelled": true,
+      "wem_facilities": [
+        "GRASMERE_WF1"
+      ]
     },
     {
       "station_id": "RUBICON",
@@ -11313,7 +11418,10 @@
         "location": "Open Electricity facilities GeoJSON (CC BY-NC 4.0)",
         "retrieved_at": "2026-08-06T13:37:06.830Z"
       },
-      "modelled": false
+      "modelled": true,
+      "wem_facilities": [
+        "GREENOUGH_RIVER_PV1"
+      ]
     },
     {
       "station_id": "TESLA_GERALDTON",
@@ -11335,7 +11443,10 @@
         "location": "Open Electricity facilities GeoJSON (CC BY-NC 4.0)",
         "retrieved_at": "2026-08-06T13:37:06.830Z"
       },
-      "modelled": false
+      "modelled": true,
+      "wem_facilities": [
+        "TESLA_GERALDTON_G1"
+      ]
     },
     {
       "station_id": "TESLA_KEMERTON",
@@ -11357,7 +11468,10 @@
         "location": "Open Electricity facilities GeoJSON (CC BY-NC 4.0)",
         "retrieved_at": "2026-08-06T13:37:06.830Z"
       },
-      "modelled": false
+      "modelled": true,
+      "wem_facilities": [
+        "TESLA_KEMERTON_G1"
+      ]
     },
     {
       "station_id": "TESLA_NORTHAM",
@@ -11379,7 +11493,10 @@
         "location": "Open Electricity facilities GeoJSON (CC BY-NC 4.0)",
         "retrieved_at": "2026-08-06T13:37:06.830Z"
       },
-      "modelled": false
+      "modelled": true,
+      "wem_facilities": [
+        "TESLA_NORTHAM_G1"
+      ]
     },
     {
       "station_id": "TESLA_PICTON",
@@ -11401,7 +11518,10 @@
         "location": "Open Electricity facilities GeoJSON (CC BY-NC 4.0)",
         "retrieved_at": "2026-08-06T13:37:06.830Z"
       },
-      "modelled": false
+      "modelled": true,
+      "wem_facilities": [
+        "TESLA_PICTON_G1"
+      ]
     },
     {
       "station_id": "ADP",
@@ -11604,7 +11724,10 @@
         "location": "Open Electricity facilities GeoJSON (CC BY-NC 4.0)",
         "retrieved_at": "2026-08-06T13:37:06.830Z"
       },
-      "modelled": false
+      "modelled": true,
+      "wem_facilities": [
+        "NORTHAM_SF_PV1"
+      ]
     },
     {
       "station_id": "YAWWF",
@@ -12311,7 +12434,10 @@
         "location": "Open Electricity facilities GeoJSON (CC BY-NC 4.0)",
         "retrieved_at": "2026-08-06T13:37:06.830Z"
       },
-      "modelled": false
+      "modelled": true,
+      "wem_facilities": [
+        "BLAIRFOX_KARAKIN_WF1"
+      ]
     },
     {
       "station_id": "BLAIRFOX_WESTHILLS",
@@ -12333,7 +12459,10 @@
         "location": "Open Electricity facilities GeoJSON (CC BY-NC 4.0)",
         "retrieved_at": "2026-08-06T13:37:06.830Z"
       },
-      "modelled": false
+      "modelled": true,
+      "wem_facilities": [
+        "BLAIRFOX_WESTHILLS_WF3"
+      ]
     },
     {
       "station_id": "TAMALA_PARK",
@@ -12355,7 +12484,10 @@
         "location": "Open Electricity facilities GeoJSON (CC BY-NC 4.0)",
         "retrieved_at": "2026-08-06T13:37:06.830Z"
       },
-      "modelled": false
+      "modelled": false,
+      "wem_facilities": [
+        "TAMALA_PARK"
+      ]
     },
     {
       "station_id": "CBWW",
@@ -12448,7 +12580,10 @@
         "location": "Open Electricity facilities GeoJSON (CC BY-NC 4.0)",
         "retrieved_at": "2026-08-06T13:37:06.830Z"
       },
-      "modelled": false
+      "modelled": false,
+      "wem_facilities": [
+        "SOUTH_CARDUP"
+      ]
     },
     {
       "station_id": "GLENMAGG",
@@ -12557,7 +12692,10 @@
         "location": "Open Electricity facilities GeoJSON (CC BY-NC 4.0)",
         "retrieved_at": "2026-08-06T13:37:06.830Z"
       },
-      "modelled": false
+      "modelled": false,
+      "wem_facilities": [
+        "ROCKINGHAM"
+      ]
     },
     {
       "station_id": "FLYCRKWF",
@@ -12608,7 +12746,10 @@
         "location": "Open Electricity facilities GeoJSON (CC BY-NC 4.0)",
         "retrieved_at": "2026-08-06T13:37:06.830Z"
       },
-      "modelled": false
+      "modelled": false,
+      "wem_facilities": [
+        "RED_HILL"
+      ]
     },
     {
       "station_id": "BROOKLYN",
@@ -12746,7 +12887,10 @@
         "location": "Open Electricity facilities GeoJSON (CC BY-NC 4.0)",
         "retrieved_at": "2026-08-06T13:37:06.830Z"
       },
-      "modelled": false
+      "modelled": false,
+      "wem_facilities": [
+        "HENDERSON_RENEWABLE_IG1"
+      ]
     },
     {
       "station_id": "SKYFRM_MTBARKER",
@@ -12768,7 +12912,10 @@
         "location": "Open Electricity facilities GeoJSON (CC BY-NC 4.0)",
         "retrieved_at": "2026-08-06T13:37:06.830Z"
       },
-      "modelled": false
+      "modelled": false,
+      "wem_facilities": [
+        "SKYFRM_MTBARKER_WF1"
+      ]
     },
     {
       "station_id": "MBPS2",
@@ -12964,7 +13111,10 @@
         "location": "Open Electricity facilities GeoJSON (CC BY-NC 4.0)",
         "retrieved_at": "2026-08-06T13:37:06.830Z"
       },
-      "modelled": false
+      "modelled": false,
+      "wem_facilities": [
+        "BIOGAS01"
+      ]
     },
     {
       "station_id": "KALBARRI",
@@ -12986,7 +13136,10 @@
         "location": "Open Electricity facilities GeoJSON (CC BY-NC 4.0)",
         "retrieved_at": "2026-08-06T13:37:06.830Z"
       },
-      "modelled": false
+      "modelled": false,
+      "wem_facilities": [
+        "KALBARRI_WF1"
+      ]
     },
     {
       "station_id": "DCWL_DENMARK",
@@ -13008,7 +13161,10 @@
         "location": "Open Electricity facilities GeoJSON (CC BY-NC 4.0)",
         "retrieved_at": "2026-08-06T13:37:06.830Z"
       },
-      "modelled": false
+      "modelled": false,
+      "wem_facilities": [
+        "DCWL_DENMARK_WF1"
+      ]
     },
     {
       "station_id": "KALAMUNDA_SG",
@@ -13030,7 +13186,8 @@
         "location": "Open Electricity facilities GeoJSON (CC BY-NC 4.0)",
         "retrieved_at": "2026-08-06T13:37:06.830Z"
       },
-      "modelled": false
+      "modelled": false,
+      "wem_facilities": []
     },
     {
       "station_id": "ATLAS",
@@ -13052,7 +13209,8 @@
         "location": "Open Electricity facilities GeoJSON (CC BY-NC 4.0)",
         "retrieved_at": "2026-08-06T13:37:06.830Z"
       },
-      "modelled": false
+      "modelled": false,
+      "wem_facilities": []
     },
     {
       "station_id": "CESF",
@@ -13480,7 +13638,8 @@
         "location": "Open Electricity facilities GeoJSON (CC BY-NC 4.0)",
         "retrieved_at": "2026-08-06T13:37:06.830Z"
       },
-      "modelled": false
+      "modelled": false,
+      "wem_facilities": []
     },
     {
       "station_id": "AMBRISOLAR",
@@ -13502,7 +13661,10 @@
         "location": "Open Electricity facilities GeoJSON (CC BY-NC 4.0)",
         "retrieved_at": "2026-08-06T13:37:06.830Z"
       },
-      "modelled": false
+      "modelled": false,
+      "wem_facilities": [
+        "AMBRISOLAR_PV1"
+      ]
     },
     {
       "station_id": "BREMER_BAY",
@@ -13524,7 +13686,10 @@
         "location": "Open Electricity facilities GeoJSON (CC BY-NC 4.0)",
         "retrieved_at": "2026-08-06T13:37:06.830Z"
       },
-      "modelled": false
+      "modelled": false,
+      "wem_facilities": [
+        "BREMER_BAY_WF1"
+      ]
     },
     {
       "station_id": "ALDGASF",
@@ -22120,7 +22285,30 @@
         "location": "Open Electricity facilities GeoJSON (CC BY-NC 4.0)",
         "retrieved_at": "2026-08-06T13:37:06.830Z"
       },
-      "modelled": false
+      "modelled": false,
+      "wem_facilities": []
     }
-  ]
+  ],
+  "wem": {
+    "joined_against": "2026-08-05",
+    "facilities_in_feed": 76,
+    "facilities_matched": 70,
+    "unmatched_facilities": [
+      "ALINTA_WGP_ESR1",
+      "ALINTA_WGP_GT",
+      "ALINTA_WGP_U2",
+      "BLAIRFOX_BEROSRD_WF1",
+      "PRDSO_WALPOLE_HG1",
+      "SBSOLAR1_CUNDERDIN_PV1"
+    ],
+    "storage_excluded": [
+      "COLLIE_BESS2 (from COLLIE)",
+      "COLLIE_ESR1 (from COLLIE)",
+      "COLLIE_ESR4 (from COLLIE)",
+      "COLLIE_ESR5 (from COLLIE)",
+      "KWINANA_ESR1 (from KWINANA)",
+      "KWINANA_ESR2 (from KWINANA)"
+    ],
+    "stations_modelled": 37
+  }
 }
