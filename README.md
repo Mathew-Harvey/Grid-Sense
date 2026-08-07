@@ -189,12 +189,25 @@ everything found wrong, ambiguous or unverifiable during the build — including
 three places the original specification contradicted the live data — is in
 `FLAGS.md`. Decisions and their reasons are in `DECISIONS.md`.
 
-Headline results from the 90-day walk-forward backtest: median renewable skill
-at the 1-hour horizon of 0.30 against persistence, all 44 wind and solar
-stations positive at every horizon, and conformal coverage within ±3 pp of
-nominal from five minutes out to six hours (the 24-hour band runs ~5 pp
-under-covered — see FLAGS F11). Regional generation totals reconcile with
-AEMO's published figures to within 3% across consecutive intervals.
+Headline results from the 88-day walk-forward backtest over 92 stations, 37 of
+them Western Australian: median renewable skill at the 1-hour horizon of 0.288
+against persistence, and 57 of 59 wind and solar stations positive at every
+horizon. The two exceptions are both 5 MW WA wind farms, negative only at the
+short horizons — at that size a farm is one or two turbines, and its
+minute-to-minute output is turbine noise that persistence tracks better than
+weather can.
+
+Measured on its own, the NEM fleet sits at 0.297 and the WA fleet at 0.258. WA
+scores lower for a structural reason rather than a modelling one: the WEM
+publishes no available-energy figure and no semi-dispatch cap, so those
+stations are forecast against actual output with an unknown curtailment mask,
+where the NEM fleet is forecast against a published availability with curtailed
+intervals excluded.
+
+Conformal coverage is within 0.2 pp of nominal from five minutes to one hour,
+3.1 pp under at six hours and 5.9 pp under at 24 hours — see FLAGS F11, which
+stays open. Regional generation totals reconcile with AEMO's published figures
+to within 3% across consecutive intervals.
 
 ## Licensing and attribution
 

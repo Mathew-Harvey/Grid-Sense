@@ -37,14 +37,15 @@ predict a coal plant and a loop that tries will not terminate.
 **Max passes:** 8. One change per pass — changing three things and seeing the
 score improve teaches nothing about which one helped.
 
-**Exit reached at pass 3, held at pass 4.** Median renewable skill at the
-one-hour horizon is 0.301 against a 0.10 threshold, and 84% of wind and solar
-stations are positive at every horizon against an 80% threshold. Thermal is
-recorded and excluded as intended.
+**Exit reached at pass 3, held at passes 4 and 5.** Median renewable skill at
+the one-hour horizon is 0.288 against a 0.10 threshold, and 97% of wind and
+solar stations are positive at every horizon against an 80% threshold. Thermal
+is recorded and excluded as intended.
 
 | Pass | Median skill @1h | % stations >0 all horizons | Worst pair | Change made |
 |---|---|---|---|---|
-| 4 | **0.301** | **84%** | — | Scored the band that was actually issued rather than one recomputed at update time (see Loop C pass 3). Loop B stays past both thresholds. |
+| 5 | **0.288** | **97%** (57/59) | wind @5min, **−0.18** | **Western Australia added to the fleet**: 59 renewable stations, up from 44, the extra 15 being SWIS wind and solar. The median fell 0.301 → 0.288 and that is a composition change, not a regression — measured separately, the 44 NEM stations sit at 0.297 and the 15 WA stations at 0.258. WA scores lower for a reason worth stating: the WEM publishes no available-energy figure, so those stations are forecast against actual output with an unknown curtailment mask, where the NEM fleet is forecast against a published UIGF with curtailed intervals excluded. The two stations negative at any horizon are both 5 MW BlairFox farms (KARAKIN, WESTHILLS), negative only at 5min–1h and positive at 6h and 24h — at 5 MW a farm is one or two turbines, so its minute-to-minute output is dominated by turbine-level noise that persistence tracks better than any weather-driven model can. |
+| 4 | 0.301 | 84% | — | Scored the band that was actually issued rather than one recomputed at update time (see Loop C pass 3). Loop B stays past both thresholds. |
 | 3 | 0.297 | **86%** | — | **Conditional conformal scale.** Forecast error tracks generation level: a solar farm at midnight cannot be wrong, the same farm under broken cloud at noon can be wrong by most of its nameplate. One unconditional band has to cover both, so it is far too wide across the 60% of intervals that are night — and a probabilistic forecast that is exactly right all night still loses to persistence, because the score charges for width. Normalising residuals by `max(forecast, 0.05·capacity)` flipped solar @24h from **−0.236 to +0.075** and every cell in the table is now positive. |
 | 2b | 0.291 | 57% | solar @24h, **−0.236** | `eta` raised to match the realised loss span. Hedge's bound assumes losses in [0,1]; ours average 0.033–0.095, so each round multiplied a weight by ~0.997 and the mixture was still near-uniform after 5,000 rounds — the combination was scoring worse than its own best member. Helped the short horizons (wind 5min 0.202→0.256, 6h 0.423→0.478); did not touch solar @24h, which ruled out convergence as the cause. |
 | 2a | 0.308 | 57% | solar @24h, **−0.213** | Fed the fitted power curves into the Physical expert, which had been running on a generic default. Wind @24h 0.445→0.517. Solar unchanged, and the diagnosis showed why: for wind the Physical expert earns weight 0.749 with MAE 28.8 against persistence's 50.7, while for solar it earns 0.010 with MAE 21.4 against persistence's 9.3. |
@@ -60,8 +61,9 @@ final 14 days.
 the PIT histogram passes a chi-squared uniformity test at p > 0.05.
 **Max passes:** 6.
 
-**4 of 5 horizons pass at 90 days; 24h remains outside and is held open in
-FLAGS F11.** Re-measuring over the full 90-day backfill — the diagnostic F11
+**3 of 5 horizons pass on the WA-inclusive fleet; 6h is marginal at 3.1pp and
+24h remains outside, held open in FLAGS F11.** Re-measuring over the full
+90-day backfill — the diagnostic F11
 named — brought 6h into tolerance without touching a parameter, which confirms
 the shortfall there was sample size, not method. 24h improved from 83.8% to
 85.4% on the 90% band but stays 4.6pp short: a day-ahead error series is
@@ -75,6 +77,7 @@ Measured on renewables, median across stations.
 
 | Pass | 90% coverage by horizon (5min → 24h) | 80% coverage | Within ±3pp? | Change made |
 |---|---|---|---|---|
+| 6 | 90.0 / 89.9 / 89.8 / **86.9** / 84.1 | 80.0 / 80.0 / 80.0 / **78.0** / 74.7 | 5min–1h **yes** (≤0.2pp); 6h **marginal**, 3.1pp on the 90% band; 24h no (5.9pp / 5.3pp) | **Western Australia added to the fleet** — no parameter changed. 6h slipped from 87.2 to 86.9 and back outside tolerance by 0.1pp, and 24h from 85.4 to 84.1. Both are the WA stations pulling the median down rather than the NEM stations moving: WA is forecast against actual output with an unknown curtailment mask, so its residual distribution carries curtailment events the NEM path excludes, and a band fitted to residuals that include unflagged curtailment under-covers. Recorded as a measured consequence of a wider fleet, not tuned away; it belongs with F11's open question rather than a sixth blind parameter nudge. |
 | 5 | 90.0 / 90.0 / 89.9 / 87.3 / 85.8 | 80.0 / 80.0 / 80.0 / 78.3 / 75.6 | same as pass 4 | Widened the 24h residual window from ~7 days to ~25 (2000 → 7200 intervals), on the theory that a short window re-fits the band to each passing synoptic regime. Over 90 days the 90% band gained 0.4pp and the 80% band lost 0.7pp — a wash. Window size is not the binding constraint; **reverted** and F11 stays open with the sample-starvation diagnosis standing. |
 | 4 | 90.0 / 90.0 / 89.9 / **87.2** / 85.4 | 80.0 / 80.0 / 80.0 / **78.4** / 76.3 | **5min–6h yes**; 24h no (4.6pp / 3.7pp) | No parameter changed — re-measured over 90 days instead of 20, as F11's diagnostic named. 6h moved from 3.4pp short to inside tolerance on both bands. The same run lifted Loop B to 100% of renewable stations positive at every horizon, with solar @24h at +0.268. |
 | 3 | **90.0 / 90.0 / 89.8** / 86.6 / 83.8 | **80.0 / 80.1 / 80.0** / 77.7 / 75.3 | 5min, 30min and 1h **yes**; 6h marginal at 3.4pp; **24h no** | `update()` was recomputing the interval from the current alpha instead of scoring the band that was actually issued. At a six-hour horizon that band was made 72 intervals earlier and alpha had moved under it, so the feedback chased its own tail. Scoring the issued band brought 1h from 88.7 to 89.8 and 30min to exactly nominal. |
