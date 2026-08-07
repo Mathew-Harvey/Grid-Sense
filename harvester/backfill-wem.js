@@ -106,7 +106,13 @@ export function foldDay(rows, facilityToStation, capacityOf = new Map()) {
   return { rows: out, unknown };
 }
 
-export async function run({ days = 21, force = false } = {}) {
+/**
+ * The facility-to-station mapping the fold needs, read from the registry.
+ *
+ * Shared with the live catch-up so both routes resolve a facility code the same
+ * way — a second mapping built somewhere else is a second thing to keep true.
+ */
+export async function stationMaps() {
   const registry = JSON.parse(await fs.readFile(path.join(HERE, 'registry.json'), 'utf8'));
   const swis = registry.stations.filter((s) => s.region === 'SWIS');
   if (swis.length === 0) throw new Error('registry has no SWIS stations; run build-registry first');
@@ -120,6 +126,54 @@ export async function run({ days = 21, force = false } = {}) {
   if (facilityToStation.size === 0) {
     throw new Error('no wem_facilities on any SWIS station; run build-wem-codes.js first');
   }
+  return { swis, facilityToStation, capacityOf };
+}
+
+/**
+ * Fetch, fold and write one trading day, unless it is already on disk.
+ *
+ * @param {string} iso trading day, YYYY-MM-DD
+ * @param {string|null} fileName archive zip name, or null to read `current/`
+ * @returns {Promise<{iso: string, cached?: boolean, rows?: number, intervals?: number}>}
+ */
+export async function ingestDay(iso, fileName, maps, { force = false } = {}) {
+  const outPath = path.join(DATA_DIR, `${iso}.json`);
+  if (!force) {
+    try { await fs.access(outPath); return { iso, cached: true }; } catch { /* not cached */ }
+  }
+  await fs.mkdir(DATA_DIR, { recursive: true });
+  const { rows, unknown } = foldDay(
+    await fetchDay(iso, fileName), maps.facilityToStation, maps.capacityOf);
+  await fs.writeFile(outPath, JSON.stringify({ day: iso, mask: 'none', rows }));
+  return { iso, rows: rows.length, intervals: new Set(rows.map((r) => r.settlement_ms)).size, unknown };
+}
+
+/**
+ * Pull any completed trading day that `current/` offers and the disk lacks.
+ *
+ * This is the whole of Western Australia's live path, and it is a daily one.
+ * Measured on 7 August 2026 at 17:53 AWST: `current/` held the trading day that
+ * closed at 07:55 that morning, and the archive was a further day behind. There
+ * is no intra-day WA feed to poll — see FLAGS F18 — so the best available
+ * currency is to notice the completed day as soon as it appears, which is what
+ * this does and what the backfill alone would not.
+ */
+export async function catchUpFromCurrent() {
+  const maps = await stationMaps();
+  const html = new TextDecoder().decode(await fetchBuffer(LIVE));
+  const days = [...html.matchAll(/SCADA_(\d{4}-\d{2}-\d{2})\.json/g)].map((m) => m[1]);
+
+  const ingested = [];
+  for (const iso of [...new Set(days)].sort()) {
+    const r = await ingestDay(iso, null, maps);
+    if (!r.cached) ingested.push(r);
+  }
+  return { offered: [...new Set(days)].sort(), ingested };
+}
+
+export async function run({ days = 21, force = false } = {}) {
+  const maps = await stationMaps();
+  const { swis, facilityToStation } = maps;
 
   await fs.mkdir(DATA_DIR, { recursive: true });
   const archive = await listArchiveDays();
@@ -129,20 +183,15 @@ export async function run({ days = 21, force = false } = {}) {
 
   let fetched = 0, skipped = 0, failed = 0, short = 0;
   for (const iso of wanted) {
-    const outPath = path.join(DATA_DIR, `${iso}.json`);
-    if (!force) {
-      try { await fs.access(outPath); skipped++; continue; } catch { /* not cached */ }
-    }
     try {
       const t0 = Date.now();
-      const { rows, unknown } = foldDay(await fetchDay(iso, archive.get(iso)), facilityToStation, capacityOf);
-      await fs.writeFile(outPath, JSON.stringify({ day: iso, mask: 'none', rows }));
+      const r = await ingestDay(iso, archive.get(iso), maps, { force });
+      if (r.cached) { skipped++; continue; }
       fetched++;
-      const intervals = new Set(rows.map((r) => r.settlement_ms)).size;
-      if (intervals !== INTERVALS_PER_DAY) short++;
+      if (r.intervals !== INTERVALS_PER_DAY) short++;
       console.log(
-        `  ${iso}  ${String(rows.length).padStart(6)} rows  ${String(intervals).padStart(3)} intervals` +
-        `  ${unknown ? `${unknown} unmapped` : ''}  ${Date.now() - t0} ms`,
+        `  ${iso}  ${String(r.rows).padStart(6)} rows  ${String(r.intervals).padStart(3)} intervals` +
+        `  ${r.unknown ? `${r.unknown} unmapped` : ''}  ${Date.now() - t0} ms`,
       );
     } catch (err) {
       failed++;

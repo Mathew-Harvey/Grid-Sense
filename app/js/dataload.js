@@ -41,6 +41,36 @@ const safeFileName = (id) => encodeURIComponent(id).replace(/\*/g, '%2A');
 const isoDay = (ms) => new Date(ms).toISOString().slice(0, 10);
 const dayMsOf = (iso) => Date.parse(`${iso}T00:00:00Z`);
 
+/**
+ * What a stored manifest already covers, per feed.
+ *
+ * The two sets are deliberately independent, and that independence is the
+ * substance of this function rather than an implementation detail. A cached day
+ * means the eastern stations were stored for it; the SWIS stations come from a
+ * different feed, under different keys, and may well not have been. Reading one
+ * set for both meant a browser that loaded the site before Western Australia
+ * was deployed skipped the WA fetch on every cached day for good — reporting
+ * "no Western Australian dispatch" at a server that was serving it, with no way
+ * out but clearing site data. See FLAGS F19.
+ *
+ * A manifest written before WA existed has no `wem_days`, which reads as
+ * nothing covered, so those browsers repair themselves on the next load instead
+ * of needing the whole 21-day dispatch window re-fetched behind a version bump.
+ *
+ * @param {object|null} cached the stored manifest, or null to ignore the cache
+ * @param {number} stationCount modelled stations now, to detect a changed fleet
+ * @returns {{days: Set<string>, wemDays: Set<string>}}
+ */
+export function cachedCoverage(cached, stationCount) {
+  const usable = Boolean(cached)
+    && cached.version === CACHE_VERSION
+    && cached.stationCount === stationCount;
+  return {
+    days: new Set(usable ? cached.days ?? [] : []),
+    wemDays: new Set(usable ? cached.wem_days ?? [] : []),
+  };
+}
+
 /** Let the browser paint. Without this the whole load is one frame and the
  *  progress the user was promised appears only once it is finished. */
 const yieldToPaint = () => new Promise((r) => setTimeout(r, 0));
@@ -350,11 +380,7 @@ export async function loadAll({ days = DEFAULT_DAYS, force = false, onProgress =
   }
 
   const cached = force ? null : await getMeta('manifest');
-  const haveDays = new Set(
-    cached && cached.version === CACHE_VERSION && cached.stationCount === stations.length
-      ? cached.days
-      : [],
-  );
+  const { days: haveDays, wemDays: haveWemDays } = cachedCoverage(cached, stations.length);
 
   // ---- dispatch ---------------------------------------------------------
   const loadedDays = [];
@@ -394,12 +420,12 @@ export async function loadAll({ days = DEFAULT_DAYS, force = false, onProgress =
   // continent a station is on. Two things it cannot carry: WEM publishes no
   // available-energy figure and no curtailment flag, so `uigf_mw` is null and
   // the mask is genuinely unknown rather than false.
-  let wemDays = 0;
+  const wemCovered = new Set(haveWemDays);
   let wemStations = 0;
   if (swisIds.size > 0) {
     for (let i = 0; i < wanted.length; i++) {
       const day = wanted[i];
-      if (haveDays.has(day.iso)) continue;
+      if (haveWemDays.has(day.iso)) continue;
       report('dispatch', `Western Australia ${day.iso}`, i, wanted.length);
 
       let file;
@@ -430,14 +456,20 @@ export async function loadAll({ days = DEFAULT_DAYS, force = false, onProgress =
         observations.sort((a, b) => a.observed_at - b.observed_at);
         await putStationDay(stationId, day.ms, packDay(observations));
       }
-      if (byStation.size > 0) { wemDays++; wemStations = Math.max(wemStations, byStation.size); }
+      // Only a day that actually yielded stations counts as covered. A 404
+      // recorded as covered would never be retried, so a day the harvester
+      // publishes later would stay invisible to a browser that asked too early.
+      if (byStation.size > 0) {
+        wemCovered.add(day.iso);
+        wemStations = Math.max(wemStations, byStation.size);
+      }
       await yieldToPaint();
     }
 
     notes.push({
       source: 'wem',
-      message: wemDays > 0
-        ? `Western Australia: ${wemStations} stations over ${wemDays} days. The WEM feed publishes no available-energy figure and no curtailment flag, so WA stations are scored without the curtailment mask the eastern states get.`
+      message: wemCovered.size > 0
+        ? `Western Australia: ${wemStations || swisIds.size} stations over ${wemCovered.size} days. The WEM feed publishes no available-energy figure and no curtailment flag, so WA stations are scored without the curtailment mask the eastern states get.`
         : `No Western Australian dispatch under ${DATA}/wem-dispatch/. Run harvester/backfill-wem.js to include the SWIS.`,
     });
   }
@@ -526,6 +558,7 @@ export async function loadAll({ days = DEFAULT_DAYS, force = false, onProgress =
     version: CACHE_VERSION,
     stationCount: stations.length,
     days: loadedDays.map((d) => d.iso),
+    wem_days: [...wemCovered].sort(),
     completed_at: Date.now(),
   });
 

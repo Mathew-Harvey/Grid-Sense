@@ -120,9 +120,35 @@ export const server = http.createServer(async (req, res) => {
 
 if (import.meta.url === `file://${process.argv[1]}`) {
   const port = Number(process.env.PORT) || 8080;
-  server.listen(port, () => {
+  server.listen(port, async () => {
     console.log(`GridSense on http://localhost:${port}`);
     console.log(`  app   ${APP_DIR}`);
     console.log(`  data  ${DATA_DIR}`);
+
+    // The poller lives in the server process rather than a second Render
+    // component, because it writes to the same ephemeral disk this process
+    // serves from — two components would each get their own copy of it, and
+    // the one doing the fetching would not be the one answering requests.
+    //
+    // Started here rather than at module scope so importing `server` in a test
+    // does not open a socket to NEMWeb.
+    if (process.env.GRIDSENSE_LIVE === '0') {
+      console.log('  live  disabled (GRIDSENSE_LIVE=0)');
+      return;
+    }
+    const { start, POLL_MS } = await import('./live.js');
+    console.log(`  live  polling every ${POLL_MS / 1000}s`);
+    start({
+      onTick: (m) => {
+        const parts = Object.entries(m.feeds).map(([name, f]) => (
+          f.cadence === 'daily'
+            ? `${name} ${f.last_day ?? 'none'}${f.error ? ' ERROR' : ''}`
+            : `${name} +${f.written}${f.error ? ` ERROR ${f.error}` : ''}`
+        ));
+        // One line per tick is a minute's worth of log on a service that runs
+        // for weeks; enough to see the feed stop, little enough to leave on.
+        console.log(`live  ${parts.join('  ')}`);
+      },
+    });
   });
 }

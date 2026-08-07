@@ -687,3 +687,28 @@ reads rather than against the order that happens to be written down.
 
 Found by checking a build command against its dependencies rather than
 assuming the order that produced correct output locally was the correct order.
+
+## F19 — a browser cache that could never learn Western Australia existed
+
+The dashboard reported "No Western Australian dispatch under
+/data/wem-dispatch/" against a server that was serving it — measured at HTTP
+200, 1.38 MB for `2026-08-05.json`, at the moment the message was on screen.
+
+The WA ingest skipped any day already present in IndexedDB. That set is written
+by the eastern ingest, and a cached day says only that the eastern stations
+were stored for it; SWIS stations arrive from a different feed under different
+keys and, before WA was deployed, were not stored at all. So every returning
+visitor had every day cached, the WA fetch never ran once, and no redeploy
+could change it. The only escape was clearing site data, which nobody would
+think to do while the panel was naming a server-side cause.
+
+Two feeds now keep two coverage records. A manifest written before WA existed
+carries no `wem_days` key, which reads as nothing covered, so affected browsers
+repair themselves on the next load rather than behind a cache-version bump that
+would re-fetch the whole 21-day dispatch window. `test/dataload-coverage.test.js`
+asserts the two sets are independent.
+
+The general shape is worth naming: a client-side cache that records coverage
+for one feed and is read for another cannot be diagnosed from the server, and
+the interface's own diagnostic pointed confidently at the wrong half of the
+system.
