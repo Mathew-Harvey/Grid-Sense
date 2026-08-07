@@ -802,3 +802,35 @@ makes zero failed requests, against a console that previously carried a dozen.
 Recorded because the cost was diagnostic, not functional. Twice in one session a
 real fault was mistaken for expected noise, and the fix is not "read the console
 more carefully" — it is to leave nothing in it that does not matter.
+
+## F22 — the bands are calibrated on weather nobody had at the time — OPEN
+
+Conformal coverage is measured in the backtest against ERA5 reanalysis: the
+weather as it is reconstructed afterwards, with every observation in hand. Live
+forecasting past the last observed hour runs on Open-Meteo's forecast instead,
+which is a worse input, and the error it carries is not in any residual the
+conformal window has ever seen.
+
+So the reported coverage — within 0.2 pp of nominal to one hour, 3.1 pp under at
+six hours — is a statement about forecasting with hindsight weather. Live
+coverage at the longer horizons will be worse than that by some amount, and the
+band will be too narrow in exactly the direction that flatters the system.
+
+**The amount is not known, and the obvious measurement does not produce it.**
+Comparing `data/weather-forecast/` against `data/weather/` over the hours both
+cover gives MAE 0.000 on all thirteen variables across 1,008 station-hours:
+Open-Meteo's forecast endpoint serves the same reanalysis-derived values for
+past hours that the archive endpoint does. The comparison measures the join, not
+the forecast, and reporting its zero as "forecast weather is as good as
+reanalysis" would be the most flattering possible misreading of it.
+
+What would actually measure it: Open-Meteo's historical-forecast API, which
+serves the forecast *as issued* at a given lead time, so a 24-hour-ahead
+forecast can be scored against the reanalysis for the hour it predicted. Then
+the residuals feeding AdaptiveConformal would carry weather error at horizon
+rather than none, and the band would widen where it should.
+
+Left open rather than patched with a guessed multiplier. A widening factor
+chosen to make coverage look right would be indistinguishable from one chosen
+because it was correct, and the whole point of the conformal layer is that its
+width is earned.

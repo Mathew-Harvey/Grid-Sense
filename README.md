@@ -217,7 +217,11 @@ intervals excluded.
 
 Conformal coverage is within 0.2 pp of nominal from five minutes to one hour,
 3.1 pp under at six hours and 5.9 pp under at 24 hours — see FLAGS F11, which
-stays open. Regional generation totals reconcile with AEMO's published figures
+stays open. Those figures are measured against ERA5 reanalysis, which is the
+weather as reconstructed afterwards. Live forecasting past the last observed
+hour runs on forecast weather, which is worse, so live coverage at the longer
+horizons will be worse than this by an amount that is not yet measured — FLAGS
+F22, and deliberately not patched with a guessed widening factor. Regional generation totals reconcile with AEMO's published figures
 to within 3% across consecutive intervals.
 
 ## Licensing and attribution
