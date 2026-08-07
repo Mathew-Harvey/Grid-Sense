@@ -26,7 +26,7 @@ import {
 // harvester as a separate service — points this at the harvester's origin by
 // setting window.GRIDSENSE_API_BASE before the app boots; the server sends
 // open CORS for exactly that arrangement.
-const DATA = `${globalThis.GRIDSENSE_API_BASE ?? ''}/data`;
+export const DATA = `${globalThis.GRIDSENSE_API_BASE ?? ''}/data`;
 const MS_PER_DAY = 86_400_000;
 
 /** Three weeks is past the seven-day conformal window with room for a warm-up,
@@ -36,6 +36,11 @@ export const DEFAULT_DAYS = 21;
 // Bumped when the packing or the derived weather features change, so a stale
 // IndexedDB is rebuilt rather than read with the wrong columns in it.
 const CACHE_VERSION = 4;
+
+// How far past the dispatch window forward weather is stored. Matches what
+// harvester/backfill-weather.js --forecast fetches; the longest scored horizon
+// is 24 hours, so this covers it with room for a stale refresh.
+const FORECAST_DAYS_AHEAD = 3;
 
 const safeFileName = (id) => encodeURIComponent(id).replace(/\*/g, '%2A');
 const isoDay = (ms) => new Date(ms).toISOString().slice(0, 10);
@@ -61,6 +66,39 @@ const dayMsOf = (iso) => Date.parse(`${iso}T00:00:00Z`);
  * @param {number} stationCount modelled stations now, to detect a changed fleet
  * @returns {{days: Set<string>, wemDays: Set<string>}}
  */
+/**
+ * Join the reanalysis archive to the forward forecast for one station.
+ *
+ * Where both cover an hour, the archive wins: ERA5 is a reanalysis of what
+ * actually happened, and a forecast of the same hour is a worse answer to the
+ * same question. Beyond the archive's end — about six days short of now, which
+ * is as close as ERA5 is published — the forecast is the only answer there is,
+ * and it is what the experts predict from at every horizon past the last
+ * observation.
+ *
+ * @param {object|null} archive parsed data/weather/<id>.json
+ * @param {object|null} forecast parsed data/weather-forecast/<id>.json
+ * @returns {object|null} the same shape, or null if neither exists
+ */
+export function mergeWeatherSources(archive, forecast) {
+  if (!archive) return forecast;
+  if (!forecast) return archive;
+
+  const variables = {};
+  const names = new Set([...Object.keys(archive.variables), ...Object.keys(forecast.variables)]);
+  for (const name of names) {
+    const byTime = new Map();
+    // Forecast first so the archive overwrites it on any shared hour.
+    for (const src of [forecast.variables[name], archive.variables[name]]) {
+      if (!src) continue;
+      for (let i = 0; i < src.times.length; i++) byTime.set(src.times[i], src.values[i]);
+    }
+    const times = [...byTime.keys()].sort((a, b) => a - b);
+    variables[name] = { times, values: times.map((t) => byTime.get(t)) };
+  }
+  return { ...archive, variables, forecast_issued_at: forecast.issued_at ?? null };
+}
+
 export function cachedCoverage(cached, stationCount) {
   const usable = Boolean(cached)
     && cached.version === CACHE_VERSION
@@ -476,29 +514,44 @@ export async function loadAll({ days = DEFAULT_DAYS, force = false, onProgress =
 
   // ---- weather ----------------------------------------------------------
   const weatherDays = new Set();
+  // Days the dispatch window covers, plus the days ahead of it. Forward weather
+  // is stored for days that have no dispatch yet on purpose: that is precisely
+  // the range the live extension forecasts into, and a weather grid that
+  // stopped at the last observed interval would leave every expert with nothing
+  // to predict from the moment the replay caught up with now.
   const wantedIso = new Set(loadedDays.map((d) => d.iso));
+  const weatherIso = new Set(wantedIso);
+  const futureDays = [];
+  for (let d = 1; d <= FORECAST_DAYS_AHEAD; d++) {
+    const ms = newestMs + d * MS_PER_DAY;
+    const iso = isoDay(ms);
+    weatherIso.add(iso);
+    futureDays.push({ iso, ms });
+  }
   const needWeather = ingested > 0 || !cached || cached.version !== CACHE_VERSION;
   let missingWeather = 0;
+  let forecastStations = 0;
 
   for (let i = 0; i < stations.length; i++) {
     const station = stations[i];
     report('weather', `Weather ${station.station_name}`, i, stations.length);
     if (!needWeather) break;
 
-    let raw;
-    try {
-      raw = await fetchJson(`${DATA}/weather/${safeFileName(station.station_id)}.json`);
-    } catch {
-      missingWeather++;
-      continue;
-    }
+    const name = safeFileName(station.station_id);
+    const [archive, forecast] = await Promise.all([
+      fetchJson(`${DATA}/weather/${name}.json`).catch(() => null),
+      fetchJson(`${DATA}/weather-forecast/${name}.json`).catch(() => null),
+    ]);
+    const raw = mergeWeatherSources(archive, forecast);
+    if (!raw) { missingWeather++; continue; }
+    if (forecast) forecastStations++;
 
     const rows = deriveWeatherRows(raw, station);
     const lanes = rows.length ? Object.keys(rows[0]).filter((k) => k !== 'observed_at') : [];
     const perDay = new Map();
     for (const row of rows) {
       const iso = isoDay(row.observed_at);
-      if (!wantedIso.has(iso)) continue;
+      if (!weatherIso.has(iso)) continue;
       let bucket = perDay.get(iso);
       if (!bucket) { bucket = []; perDay.set(iso, bucket); }
       bucket.push(row);
@@ -514,6 +567,14 @@ export async function loadAll({ days = DEFAULT_DAYS, force = false, onProgress =
     notes.push({
       source: 'weather',
       message: `${missingWeather} of ${stations.length} stations have no weather archive. Their physical and analogue experts run on output alone.`,
+    });
+  }
+  if (needWeather) {
+    notes.push({
+      source: 'forecast',
+      message: forecastStations > 0
+        ? `Forward weather for ${forecastStations} stations, ${FORECAST_DAYS_AHEAD} days ahead. Beyond the reanalysis archive the experts predict from forecast weather, which is a forecast of a forecast and is the weaker half of the two.`
+        : `No forward weather under ${DATA}/weather-forecast/. Without it the experts have nothing to predict from past the last observed hour. Run harvester/backfill-weather.js --forecast.`,
     });
   }
   const uncovered = loadedDays.filter((d) => !weatherDays.has(d.iso));
@@ -564,7 +625,7 @@ export async function loadAll({ days = DEFAULT_DAYS, force = false, onProgress =
 
   return finish({
     registry, stations, byId, backtest, correlations, correlationById, curves,
-    days: loadedDays, weatherDays, prices, flows, notes, startedAt,
+    days: loadedDays, forecastDays: futureDays, weatherDays, prices, flows, notes, startedAt,
   });
 }
 

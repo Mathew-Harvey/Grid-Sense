@@ -217,6 +217,14 @@ async function build(message) {
     const output = new Float64Array(steps).fill(NaN);
     const curtailed = new Float64Array(steps);
     const usable = new Uint8Array(steps);
+    // Set only by live ingest. The five-minute SCADA feed carries output and no
+    // semi-dispatch cap — that arrives next day — so a live interval's
+    // curtailment is unknown, and the rule everywhere else in this system is
+    // that an unknown mask must never read as "not curtailed". It is admitted
+    // to scoring and to the persistence chain, where including a curtailed
+    // interval costs accuracy for one interval, and kept out of expert fitting,
+    // where it would teach a farm's power curve that the wind stopped blowing.
+    const provisional = new Uint8Array(steps);
 
     // UIGF is the available-energy figure a semi-scheduled plant is measured
     // against, and it is the field the offline backtest forecasts for wind and
@@ -237,7 +245,7 @@ async function build(message) {
     }
 
     const rows = [];
-    for (const day of message.days) {
+    for (const day of [...message.days, ...(message.weatherAhead ?? [])]) {
       const packed = await getWeatherDay(meta.station_id, day.ms);
       if (packed) rows.push(...weatherRows(packed));
     }
@@ -255,7 +263,14 @@ async function build(message) {
       output,
       curtailed,
       usable,
+      provisional,
+      useUigf,
       weather: rows.length ? toWeatherGrid(rows, t0, steps) : null,
+      // Kept, not discarded after gridding: a live interval extends the
+      // timeline, and the grid for the new steps has to be built from the rows
+      // that produced the old one. Weather beyond the last dispatch interval is
+      // already in here — that is what the forecast files are for.
+      weatherRows: rows,
       hasWeather: rows.length > 0,
       experts,
       // Held by name because the analogue's whole justification is that its
@@ -404,8 +419,12 @@ function step(state) {
     }
 
     if (usable) {
-      const learnState = stateAt(track, i, 0);
-      for (const e of track.experts) e.update(learnState, y);
+      // Persistence needs an unbroken chain, and scoring above has already
+      // happened; only the fitting is withheld on a provisional interval.
+      if (track.provisional[i] === 0) {
+        const learnState = stateAt(track, i, 0);
+        for (const e of track.experts) e.update(learnState, y);
+      }
       track.history.push(y);
       if (track.history.length > 2000) track.history.shift();
     }
@@ -775,6 +794,85 @@ function stationRows(state) {
 }
 
 // ---------------------------------------------------------------------------
+// Live extension
+// ---------------------------------------------------------------------------
+
+/**
+ * Grow one track's step-indexed arrays, preserving what is in them.
+ *
+ * Only these five arrays are indexed by step. Everything that carries what the
+ * model has learned — the experts, the Hedge weights, the conformal windows,
+ * the per-horizon slots, the history — is indexed by nothing, so a live
+ * interval extends the timeline without disturbing any of it. That is the
+ * reason live ingest is an append rather than a rebuild: a rebuild would throw
+ * away days of training to add five minutes of data.
+ */
+function growTrack(track, steps) {
+  const grow = (old, Ctor, fill) => {
+    const next = new Ctor(steps);
+    if (fill !== undefined) next.fill(fill);
+    next.set(old);
+    return next;
+  };
+  track.target = grow(track.target, Float64Array, NaN);
+  track.output = grow(track.output, Float64Array, NaN);
+  track.curtailed = grow(track.curtailed, Float64Array, 0);
+  track.usable = grow(track.usable, Uint8Array, 0);
+  track.provisional = grow(track.provisional, Uint8Array, 0);
+  // Rebuilt rather than extended: the grid interpolates between weather rows,
+  // and the last cell of the old grid was interpolated against a horizon that
+  // has just moved.
+  track.weather = track.weatherRows.length
+    ? toWeatherGrid(track.weatherRows, track.t0, steps)
+    : null;
+}
+
+/**
+ * Fold live observations into a running replay.
+ *
+ * The target is actual output, because output is all a live interval carries.
+ * For a wind or solar station the replay's target is available energy, so a
+ * live interval is measuring a slightly different quantity — lower than
+ * availability exactly when the farm was held back. It is marked provisional
+ * for that reason, and the next-day file replaces the whole day with the real
+ * availability and the real cap once AEMO publishes them.
+ *
+ * @param {object} state the running replay
+ * @param {object[]} observations per-station live rows
+ * @returns {{added: number, steps: number, latest: number|null}}
+ */
+function ingestLive(state, observations) {
+  if (!state || !observations?.length) return { added: 0, steps: state?.steps ?? 0, latest: null };
+
+  const byId = new Map(state.tracks.map((t) => [t.meta.station_id, t]));
+  const relevant = observations.filter((o) => byId.has(o.station_id) && Number.isFinite(o.output_mw));
+  if (!relevant.length) return { added: 0, steps: state.steps, latest: null };
+
+  const latest = Math.max(...relevant.map((o) => o.observed_at));
+  const needed = Math.floor((latest - state.t0) / MS_PER_STEP) + 1;
+  if (needed > state.steps) {
+    for (const track of state.tracks) growTrack(track, needed);
+    state.steps = needed;
+  }
+
+  let added = 0;
+  for (const o of relevant) {
+    const track = byId.get(o.station_id);
+    const i = Math.round((o.observed_at - state.t0) / MS_PER_STEP);
+    // A live interval that lands inside the replayed window is a duplicate of
+    // something the backfill already holds in better detail. The backfill wins.
+    if (i < 0 || i >= state.steps || Number.isFinite(track.output[i])) continue;
+    track.target[i] = o.output_mw;
+    track.output[i] = o.output_mw;
+    track.curtailed[i] = 0;
+    track.usable[i] = o.quality === 'suspect' ? 0 : 1;
+    track.provisional[i] = 1;
+    added++;
+  }
+  return { added, steps: state.steps, latest };
+}
+
+// ---------------------------------------------------------------------------
 // Transport
 // ---------------------------------------------------------------------------
 
@@ -886,6 +984,15 @@ self.onmessage = async (event) => {
           rollWindow: ROLL,
         });
         frame(run);
+        break;
+      }
+      case 'live': {
+        // The replay may have run out of timeline and stopped. Extending it is
+        // what makes it live rather than finished, so it restarts itself here —
+        // there is nothing for a person to press, and nothing to wait for.
+        const r = ingestLive(run, message.observations);
+        post({ type: 'live', ...r, cursor: run?.cursor ?? 0 });
+        if (r.added > 0 && run && run.cursor < run.steps && !run.running) start();
         break;
       }
       case 'play': start(); break;

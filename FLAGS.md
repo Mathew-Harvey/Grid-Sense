@@ -712,3 +712,31 @@ The general shape is worth naming: a client-side cache that records coverage
 for one feed and is read for another cannot be diagnosed from the server, and
 the interface's own diagnostic pointed confidently at the wrong half of the
 system.
+
+## F18 — Western Australia publishes trading days, not intervals
+
+`fetch-wem.js` was written on the assumption, stated in its own header, that
+the WEM's `facilityScada/current/` file is "appended to as the day runs".
+Measured on 7 August 2026 at 17:53 AWST — nearly ten hours into the trading day
+that opened at 08:00 — `current/` held exactly one file, `SCADA_2026-08-06.json`,
+the day that closed at 07:55 that morning. `facilityScada/previous/` was a
+further day behind, newest entry 2026-08-05. The WA operational demand feed
+behaves the same way: `OperationalDemandAndWithdrawal_2026-08-07.json` returned
+404 while the day was open.
+
+So the newest Western Australian data obtainable at any moment is between about
+ten and thirty-four hours old, and there is no endpoint to poll for anything
+fresher. This is a property of the publisher, not a gap in the client.
+
+Consequences, all taken rather than worked around:
+
+  The live poller treats WA as a daily catch-up into `data/wem-dispatch/`,
+  checked hourly, not as a five-minute feed. It still earns its place — it
+  reads `current/`, which is a day ahead of the `previous/` archive the backfill
+  reads, so WA is one trading day fresher than a build alone would leave it.
+
+  The map's SWIS demand floor cannot move in real time and does not pretend to.
+  Live market intervals carry the five NEM regions only.
+
+  The original poll-shaped implementation is kept: `pollWem` and `pollWindow`
+  are correct for what they do and are what a future live WA feed would use.

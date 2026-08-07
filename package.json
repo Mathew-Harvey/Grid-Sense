@@ -12,7 +12,7 @@
     "harvest": "node harvester/serve.js",
     "backfill": "node harvester/backfill.js",
     "serve": "node harvester/serve.js",
-    "build:data": "node harvester/backfill.js --backfill 21 && node harvester/build-wem-codes.js && node harvester/backfill-wem.js --days 21 && node harvester/backfill-weather.js --days 90 && node harvester/backfill-price.js --days 21 && node harvester/backfill-flows.js --days 21 && node harvester/correlate-run.js --days 21 && node harvester/backtest.js --days 21"
+    "build:data": "node harvester/backfill.js --backfill 21 && node harvester/build-wem-codes.js && node harvester/backfill-wem.js --days 21 && node harvester/backfill-weather.js --days 90 && node harvester/backfill-weather.js --forecast && node harvester/backfill-price.js --days 21 && node harvester/backfill-flows.js --days 21 && node harvester/correlate-run.js --days 21 && node harvester/backtest.js --days 21"
   },
   "dependencies": {
     "fflate": "^0.8.2",

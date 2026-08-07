@@ -8,7 +8,8 @@
 // against empty state first and fill in as it loads. A dashboard that shows a
 // spinner for four minutes has failed even if it eventually renders.
 
-import { loadAll, cachedManifest } from './dataload.js';
+import { loadAll, cachedManifest, DATA } from './dataload.js';
+import { createLiveFeed, describeLive } from './live.js';
 import { initExplain, updateStory } from './explain.js';
 import * as aggregateView from './views/aggregate.js';
 import * as stationView from './views/station.js';
@@ -129,6 +130,13 @@ function startWorker(loaded) {
         // asked the system not to animate has not asked to be shown a static
         // screen either, so the transport is there and labelled.
         if (!matchMedia('(prefers-reduced-motion: reduce)').matches) control('play');
+        // Started here, not when the load message was posted. The worker spends
+        // the better part of a minute reading the backfill out of IndexedDB,
+        // and a poll that lands during that window hands its intervals to a
+        // replay that does not exist yet — the client has already marked them
+        // fetched, so they are lost rather than retried, and the first minutes
+        // of live data go missing every single load.
+        startLiveFeed(loaded);
         break;
 
       case 'frame':
@@ -144,11 +152,22 @@ function startWorker(loaded) {
         // The map wants output by station id; every other view wants the rows.
         state.stationOutput = new Map(m.rows.map((r) => [r.station_id, r.output_mw]));
         if (m.stats) state.stats = unpackStats(m.stats, statsLayout);
-        // Not "switching to live updates": nothing polls. The window ends at
-        // the last day the harvester built, and it stays there until the
-        // harvester runs again and the page is reloaded.
-        if (m.type === 'handover') setStatus('Replay has reached the end of the loaded window.');
+        // The replay catching up with the present is not the end of anything
+        // when the live feed is running: the next published interval extends
+        // the timeline and the worker restarts itself. The status line says
+        // which of the two situations this is.
+        if (m.type === 'handover') {
+          setStatus(live
+            ? describeLive(liveStatus)
+            : 'Replay has reached the end of the loaded window.');
+        }
         scheduleRender();
+        break;
+
+      case 'live':
+        // Nothing to render here — the extended timeline arrives as ordinary
+        // frames. This only refreshes the sentence describing the feed.
+        if (m.added > 0) setStatus(describeLive(liveStatus));
         break;
 
       case 'empty':
@@ -175,7 +194,54 @@ function startWorker(loaded) {
     // new Date(undefined) and throwing "Invalid time value" from deep inside
     // the store, where the cause is nowhere near the symptom.
     days: loaded.days.map((d) => ({ iso: d.iso, ms: d.ms })),
+    // Days ahead of the dispatch window carry forward weather and no dispatch.
+    // The worker reads both from these lists; a day with no stored dispatch
+    // contributes nothing to the timeline, which is what a future day should do
+    // until live intervals arrive to fill it.
+    weatherAhead: (loaded.forecastDays ?? []).map((d) => ({ iso: d.iso, ms: d.ms })),
     rate: 500,
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Live feed
+// ---------------------------------------------------------------------------
+
+let live = null;
+let liveStatus = null;
+
+/**
+ * Watch the harvester's live manifest and forward new intervals to the worker.
+ *
+ * Started as soon as the replay is loaded rather than when it finishes. The
+ * replay takes minutes to walk its window; intervals published during that walk
+ * would otherwise be missed, and the feed would appear to start with a gap it
+ * never explains.
+ */
+function startLiveFeed(loaded) {
+  live?.stop();
+  liveStatus = null;
+
+  // Anything the backfill already holds is better than a live copy of it — the
+  // backfill carries availability and the curtailment cap, a live interval
+  // carries neither. So the feed only offers what falls after the loaded
+  // window, and the worker refuses duplicates on top of that.
+  const lastDay = loaded.days?.at(-1);
+  const since = lastDay ? lastDay.ms + 86_400_000 - 1 : 0;
+
+  live = createLiveFeed({
+    base: DATA,
+    since,
+    onIntervals: ({ observations }) => {
+      if (observations.length) worker?.postMessage({ type: 'live', observations });
+    },
+    onStatus: (status) => {
+      liveStatus = status;
+      // Only speak up when the feed has something to say the replay does not
+      // already cover: while the replay is still walking history, its own
+      // progress line is the more useful thing on screen.
+      if (!status.ok || status.added > 0) setStatus(describeLive(status), !status.ok);
+    },
   });
 }
 

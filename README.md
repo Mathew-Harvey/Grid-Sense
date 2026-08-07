@@ -68,6 +68,7 @@ node harvester/backfill.js --backfill 21        # NEM dispatch, ~3 min
 node harvester/build-wem-codes.js               # join WA facilities to stations, ~10 s
 node harvester/backfill-wem.js --days 21        # Western Australian dispatch, ~10 s
 node harvester/backfill-weather.js --days 90    # ERA5 weather, ~1 min, ~400 of Open-Meteo's 10k daily calls
+node harvester/backfill-weather.js --forecast   # forward weather, 3 days ahead, ~113 calls
 node harvester/backfill-price.js --days 21      # regional prices, ~3 min
 node harvester/backfill-flows.js --days 21      # regional demand + interconnector flow, ~1 min
 node harvester/correlate-run.js --days 21       # fitted power curves + weather lags, ~2 min
@@ -141,11 +142,48 @@ Three things worth knowing before the first deploy:
 - **Ephemeral disk.** Render rebuilds `data/` on every deploy — that is by
   design here (fresh data each deploy, ~650 MB for 21 days). The build takes
   roughly 15 minutes, most of it fetching from NEMWeb.
-- **Data currency.** The backfill fetches up to the most recent completed
-  trading day at build time, and that is what the dashboard trains on — it
-  does not poll live feeds. To refresh the data, redeploy: a daily
-  [deploy hook](https://render.com/docs/deploy-hooks) hit by a scheduler is
-  the intended pattern.
+- **Data currency.** The build establishes the history; the live poller keeps
+  it current from there (below). A redeploy is still the way to widen the
+  training window or pick up new code — a daily
+  [deploy hook](https://render.com/docs/deploy-hooks) hit by a scheduler works
+  — but the dashboard no longer freezes at the last built day between deploys.
+
+### Live ingest
+
+`serve.js` runs a poller in the same process, because it writes to the same
+ephemeral disk the server reads from; a second Render component would get its
+own copy of that disk and update the wrong one. Set `GRIDSENSE_LIVE=0` to turn
+it off.
+
+| Feed | Cadence | What it carries |
+|---|---|---|
+| NEM dispatch | every 5 min | station output, from `Dispatch_SCADA` |
+| Market | every 5 min | regional prices, regional demand, interconnector flow, from one `DispatchIS` file |
+| Forward weather | every 3 hours | Open-Meteo forecast, 3 days ahead, ~113 of 10,000 daily calls |
+| Western Australia | daily | a completed WEM trading day — see below |
+
+Live intervals land as one small file each under `data/live/`, listed by a
+manifest that is written **after** them so it can never name a file that is not
+there. The browser polls the manifest each minute and fetches only what it
+lacks. Files older than six hours are swept: the backfill owns history, and the
+live window only has to be wide enough for a backgrounded tab to catch up.
+
+Two honest limits, both surfaced in the interface rather than left to be
+inferred:
+
+- **Live intervals are scored but not fitted on.** The 5-minute SCADA feed
+  carries output and no semi-dispatch cap — that arrives next day — so a live
+  interval's curtailment is unknown, and an unknown mask must never read as
+  "not curtailed". Live readings therefore drive the display, the scoring and
+  the persistence chain, and are kept out of expert fitting until the next-day
+  file replaces the day with the real availability and the real cap.
+- **Western Australia is daily, not live.** Measured on 7 August 2026 at 17:53
+  AWST, ten hours into the open trading day: `facilityScada/current/` held the
+  day that closed at 07:55 that morning, and the archive was another day
+  behind. There is no intra-day WA feed to poll (FLAGS F18), so the poller
+  takes each completed trading day as soon as it appears — which is still a day
+  fresher than the archive the backfill reads. The map's SWIS floor stays at its
+  last known value while the NEM regions move.
 
 ### The static site (optional)
 

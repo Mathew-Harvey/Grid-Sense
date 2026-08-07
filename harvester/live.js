@@ -29,6 +29,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { pollScada } from './fetch-nem.js';
 import { catchUpFromCurrent } from './backfill-wem.js';
+import { refreshForecast } from './backfill-weather.js';
 import { parsePriceTable, listDispatchIsFiles } from './fetch-price.js';
 import { foldDay } from './backfill-flows.js';
 import { fetchBuffer, unzipSingle } from './fetch-util.js';
@@ -40,20 +41,35 @@ const REGISTRY = path.join(HERE, 'registry.json');
 const DISPATCHIS_DIR = 'https://nemweb.com.au/Reports/Current/DispatchIS_Reports/';
 
 const HOUR_MS = 3_600_000;
+const DAY_MS = 24 * HOUR_MS;
 
 // Western Australia is not a five-minute feed and cannot be polled like one, so
 // it is checked hourly rather than every minute. See FLAGS F18.
 const WEM_CHECK_MS = HOUR_MS;
+
+// Forward weather costs about 113 of Open-Meteo's 10,000 daily calls per
+// refresh, and their models do not update faster than hourly anyway. Three
+// hours keeps the horizon fresh at roughly 900 calls a day.
+const WEATHER_REFRESH_MS = 3 * HOUR_MS;
 
 // Dispatch publishes every five minutes, at an offset that drifts by a minute
 // or two. Polling every minute finds each interval within about sixty seconds
 // of publication and costs one directory listing per feed per minute.
 export const POLL_MS = 60_000;
 
-// How much live history stays on disk. Long enough that a client which sleeps
-// through a few intervals — a backgrounded tab, a laptop lid — resumes by
-// fetching what it missed rather than reloading the page.
-export const RETENTION_HOURS = 6;
+// How much live history stays on disk. Two things set this floor: a client
+// which sleeps through a few intervals — a backgrounded tab, a laptop lid —
+// should resume by fetching what it missed rather than reloading; and the
+// cold-start bridge below writes up to a day of catch-up intervals, which a
+// shorter window would sweep away the moment it finished writing them.
+//
+// A NEM interval file is about 135 KB, so this is roughly 60 MB against a data
+// directory that already holds several hundred.
+export const RETENTION_HOURS = 36;
+
+// How far a cold start reads back to meet the end of the backfill. Costs one
+// request per interval, so it is bounded rather than "however big the gap is".
+const BRIDGE_HOURS = 24;
 
 // Feeds that publish every five minutes and are laid down as interval files.
 // Western Australia is tracked in the manifest too, but it is a daily ingest
@@ -119,6 +135,41 @@ function byInterval(observations) {
     list.push(o);
   }
   return groups;
+}
+
+/**
+ * Where a cold start should begin reading Dispatch_SCADA.
+ *
+ * The backfill ends at the last *completed* trading day; live begins now. On a
+ * fresh deploy that leaves a gap of up to about thirty-four hours, and a replay
+ * that walks it finds nothing — a hole in every chart, between history and the
+ * present, that no amount of polling forward ever fills.
+ *
+ * Dispatch_SCADA holds roughly two days of five-minute files, which is enough
+ * to bridge it. Filenames embed the interval
+ * (PUBLIC_DISPATCHSCADA_202608071950_...), so a lexical floor built from the
+ * end of the backfill selects exactly the missing files. Capped at a day
+ * because the cost is one request per interval and an unbounded sweep of that
+ * directory is 576 of them.
+ *
+ * @returns {Promise<string|null>} a synthetic filename to filter after
+ */
+async function scadaFloor(now, maxHours = BRIDGE_HOURS) {
+  let newest = null;
+  try {
+    const days = (await fs.readdir(path.join(HERE, '..', 'data', 'nem-dispatch')))
+      .filter((n) => n.endsWith('.json')).sort();
+    newest = days.at(-1)?.slice(0, -'.json'.length) ?? null;
+  } catch { /* no backfill on disk; fall through to the floor below */ }
+
+  // The backfill's last day is complete, so the gap opens at its end — which is
+  // 04:00 UTC the next day, the NEM's 04:00 AEST trading-day boundary.
+  const fromBackfill = newest ? Date.parse(`${newest}T00:00:00Z`) + DAY_MS : 0;
+  const from = Math.max(fromBackfill, now - maxHours * HOUR_MS);
+
+  // AEMO stamps these in NEM time, which is UTC+10 the whole year round.
+  const nem = new Date(from + 10 * HOUR_MS).toISOString();
+  return `PUBLIC_DISPATCHSCADA_${nem.slice(0, 4)}${nem.slice(5, 7)}${nem.slice(8, 10)}${nem.slice(11, 13)}${nem.slice(14, 16)}`;
 }
 
 /**
@@ -235,8 +286,15 @@ export async function tick(registry, { now = Date.now(), retentionHours = RETENT
   await fs.mkdir(LIVE_DIR, { recursive: true });
   const state = await readState();
 
+  // A cold start reads back to the end of the backfill rather than taking only
+  // the newest file, so the gap between the last completed trading day and now
+  // is filled in rather than left as a hole in the middle of every chart.
+  const nemSince = state.nem?.since ?? await scadaFloor(now);
+  const bridging = state.nem?.since == null;
+  if (bridging) console.log(`live: cold start, bridging Dispatch_SCADA from ${nemSince}`);
+
   const pollers = {
-    nem: () => pollNem(registry, state.nem?.since),
+    nem: () => pollNem(registry, nemSince),
     market: () => pollMarket(state.market?.since),
   };
 
@@ -280,6 +338,25 @@ export async function tick(registry, { now = Date.now(), retentionHours = RETENT
     };
   }
 
+  // Forward weather, on its own slow cadence. Without it the live dispatch
+  // above would arrive with nothing to forecast against — every weather-driven
+  // expert would be extrapolating from the last observed hour, which is
+  // persistence wearing a physical model's name.
+  const prevWeather = state.weather ?? {};
+  let weather;
+  const weatherDue = prevWeather.refreshed_at == null
+    || now - prevWeather.refreshed_at >= WEATHER_REFRESH_MS;
+  try {
+    if (weatherDue) {
+      const r = await refreshForecast({ now });
+      state.weather = { refreshed_at: now, horizon_to: r.to, stations: r.written };
+    }
+    weather = { cadence: 'forecast', ...state.weather, error: null };
+  } catch (err) {
+    state.weather = prevWeather;
+    weather = { cadence: 'forecast', ...prevWeather, error: String(err.message) };
+  }
+
   await sweep(now, retentionHours);
   await writeState(state);
 
@@ -294,6 +371,7 @@ export async function tick(registry, { now = Date.now(), retentionHours = RETENT
     manifest.feeds[feed] = { ...feeds[feed], cadence: 'interval', latest_at: intervals.at(-1) ?? null, intervals };
   }
   manifest.feeds.wem = wem;
+  manifest.feeds.weather = weather;
 
   // Last, so nothing it names is missing from disk.
   await writeAtomic(path.join(LIVE_DIR, 'index.json'), JSON.stringify(manifest));
