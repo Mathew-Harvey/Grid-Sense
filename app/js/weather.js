@@ -108,6 +108,11 @@ function utcDate(ms) {
  * @param {{locations: number, variables: number, days: number}} request
  * @returns {number}
  */
+// Matches harvester/fetch-util.js: four retries on exponential backoff, and a
+// timeout long enough for a large multi-location archive query.
+const RETRIES = 4;
+const TIMEOUT_MS = 90_000;
+
 export function estimateCallCost({ locations, variables, days }) {
   return locations * Math.max(1, variables / 10) * Math.max(1, days / 14);
 }
@@ -206,10 +211,43 @@ export async function fetchWeather({ stations, start, end, variables, endpoint =
     `${days} days in 1 request, costing about ${cost.toFixed(1)} of 10,000 daily calls`
   );
 
-  const response = await fetch(buildWeatherUrl({ stations, start, end, variables, endpoint }));
-  const body = await response.json();
-  if (!response.ok || body.error) {
-    throw new Error(`Open-Meteo ${response.status}: ${body.reason ?? response.statusText}`);
+  const url = buildWeatherUrl({ stations, start, end, variables, endpoint });
+
+  // Retried, with a timeout, for the same reason harvester/fetch-util.js
+  // retries NEMWeb — and learned the same way. A single connect timeout to
+  // api.open-meteo.com killed a fifteen-minute deploy build that had already
+  // fetched every dispatch day, every archive weather file and the whole
+  // backtest; the one bare fetch in the pipeline was the one that dropped.
+  //
+  // Node's default connect timeout is ten seconds, which is tight for a
+  // trans-Pacific call from a cloud region, so the timeout is stated rather
+  // than inherited.
+  let body = null;
+  let response = null;
+  let lastErr = null;
+  for (let attempt = 0; attempt <= RETRIES; attempt++) {
+    if (attempt) await new Promise((r) => setTimeout(r, 2000 * 2 ** (attempt - 1)));
+    try {
+      response = await fetch(url, { signal: AbortSignal.timeout(TIMEOUT_MS) });
+      body = await response.json();
+      // A rejected request is an answer, not a fault to retry: a malformed
+      // query or an exhausted quota returns the same way however many times it
+      // is asked. Only the transport is worth trying again.
+      if (!response.ok || body.error) {
+        throw Object.assign(
+          new Error(`Open-Meteo ${response.status}: ${body.reason ?? response.statusText}`),
+          { fatal: response.status < 500 },
+        );
+      }
+      lastErr = null;
+      break;
+    } catch (err) {
+      lastErr = err;
+      if (err.fatal) break;
+    }
+  }
+  if (lastErr) {
+    throw new Error(`Open-Meteo ${endpoint} failed after ${RETRIES + 1} attempts: ${lastErr.message}`);
   }
 
   // A single location comes back as a bare object, several as an array.

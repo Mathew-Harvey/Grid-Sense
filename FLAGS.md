@@ -875,3 +875,43 @@ no error, a log that ends mid-sentence, and a 502 from the proxy rather than the
 application. The general lesson is that a memory limit intended for one phase of
 a deploy will be inherited by every other phase unless it is scoped, and that a
 Buffer is not covered by the flag most people reach for.
+
+## F24 — one bare fetch ended a fifteen-minute build
+
+A deploy failed with `ConnectTimeoutError: api.open-meteo.com:443, timeout:
+10000ms`. By that point the build had already fetched twenty-one dispatch days,
+ninety days of archive weather for ninety-four stations, prices, flows, the
+correlations and the backtest. All of it was discarded because one connection
+did not open.
+
+`harvester/fetch-util.js` retries NEMWeb four times on exponential backoff,
+because NEMWeb drops connections under load and that was learned early.
+`fetchWeather` in `app/js/weather.js` called `fetch` once, bare, with no retry
+and no stated timeout — so it inherited Node's ten-second connect default,
+which is tight for a trans-Pacific call out of a cloud region. The one fetch in
+the pipeline without the treatment every other fetch got is the one that ended
+the build.
+
+Three changes, and the second matters more than the first:
+
+  `fetchWeather` now retries four times with backoff and a ninety-second
+  timeout. A 4xx is not retried: a malformed query or an exhausted quota
+  answers the same way however many times it is asked, and retrying only makes
+  the build slower to fail.
+
+  The forecast step can no longer fail a build at all. Forward weather improves
+  the live forecast and nothing else in the pipeline reads it, so a completed
+  build must not be thrown away for it. It warns and exits zero, and the live
+  poller refreshes forward weather every three hours without a redeploy anyway.
+
+  Both weather steps isolate per chunk, so twelve stations failing costs those
+  twelve their weather rather than all ninety-four theirs. The archive step
+  still fails the build if *nothing* was fetched — with no weather at all there
+  is nothing to model, and a dashboard that cannot answer its own question
+  should not deploy.
+
+The general shape, which is the third time it has appeared in this project: a
+pipeline is only as reliable as the step nobody thought of as a network call.
+Retry was applied where failures had already been observed rather than to
+everything that crosses a network, and the gap was invisible until the one
+unlucky minute found it.

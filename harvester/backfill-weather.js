@@ -73,16 +73,29 @@ export async function backfillWeather({ days = 90, endMs = Date.now() } = {}) {
   );
 
   let written = 0;
+  let failed = 0;
   for (const group of groups) {
     for (let i = 0; i < group.stations.length; i += CHUNK) {
       const chunk = group.stations.slice(i, i + CHUNK);
-      const results = await fetchWeather({
-        stations: chunk,
-        start,
-        end: archiveEnd,
-        variables: group.variables,
-        endpoint: 'archive',
-      });
+      let results;
+      try {
+        results = await fetchWeather({
+          stations: chunk,
+          start,
+          end: archiveEnd,
+          variables: group.variables,
+          endpoint: 'archive',
+        });
+      } catch (err) {
+        // Isolated per chunk, but not forgiven wholesale — see the check after
+        // the loop. Losing twelve stations' weather costs those stations their
+        // physical and analogue experts, which the dashboard reports; losing
+        // all of it means there is nothing to model and the build should say so
+        // rather than deploy a dashboard that cannot answer its own question.
+        failed += chunk.length;
+        console.warn(`  archive failed for ${chunk.length} stations: ${err.message}`);
+        continue;
+      }
 
       for (const r of results) {
         // Typed arrays do not survive JSON, so each variable is stored as plain
@@ -98,7 +111,15 @@ export async function backfillWeather({ days = 90, endMs = Date.now() } = {}) {
     }
   }
 
-  return { stations: stations.length, written, groups: groups.length };
+  if (written === 0) {
+    throw new Error(
+      `No weather could be fetched for any of ${stations.length} stations. `
+      + 'Every expert that reads weather would run blind, so this is fatal rather than a warning.',
+    );
+  }
+  if (failed > 0) console.warn(`\n${failed} stations have no weather archive.`);
+
+  return { stations: stations.length, written, failed, groups: groups.length };
 }
 
 /**
@@ -139,12 +160,23 @@ export async function refreshForecast({ now = Date.now() } = {}) {
 
   const groups = groupByVariables(stations);
   let written = 0;
+  let failed = 0;
   for (const group of groups) {
     for (let i = 0; i < group.stations.length; i += CHUNK) {
       const chunk = group.stations.slice(i, i + CHUNK);
-      const results = await fetchWeather({
-        stations: chunk, start, end, variables: group.variables, endpoint: 'forecast',
-      });
+      let results;
+      try {
+        results = await fetchWeather({
+          stations: chunk, start, end, variables: group.variables, endpoint: 'forecast',
+        });
+      } catch (err) {
+        // One group failing costs those stations their forward weather, not
+        // every station's. The alternative — throwing — discards the groups
+        // that already succeeded, which is a worse answer to the same outage.
+        failed += chunk.length;
+        console.warn(`  forecast failed for ${chunk.length} stations: ${err.message}`);
+        continue;
+      }
       for (const r of results) {
         const out = { station_id: r.station_id, lat: r.lat, lon: r.lon, issued_at: now, variables: {} };
         for (const [name, series] of Object.entries(r.variables)) {
@@ -160,14 +192,27 @@ export async function refreshForecast({ now = Date.now() } = {}) {
       }
     }
   }
-  return { stations: stations.length, written, from: start, to: end, days };
+  return { stations: stations.length, written, failed, from: start, to: end, days };
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {
   if (process.argv.includes('--forecast')) {
-    const r = await refreshForecast();
-    console.log(`${r.written} forecast files written, ` +
-      `${new Date(r.from).toISOString().slice(0, 13)}Z .. ${new Date(r.to).toISOString().slice(0, 13)}Z`);
+    // Never fatal. Forward weather improves the live forecast and nothing else
+    // in the pipeline reads it, so a build that has fetched every dispatch day,
+    // every archive weather file, the correlations and the backtest must not be
+    // thrown away because one call to Open-Meteo timed out — which is exactly
+    // what happened on 7 August 2026. The dashboard states the absence itself.
+    try {
+      const r = await refreshForecast();
+      console.log(`${r.written} forecast files written` +
+        (r.failed ? `, ${r.failed} stations unavailable` : '') +
+        `, ${new Date(r.from).toISOString().slice(0, 13)}Z .. ${new Date(r.to).toISOString().slice(0, 13)}Z`);
+    } catch (err) {
+      console.warn(`Forward weather unavailable: ${err.message}`);
+      console.warn('Continuing. The experts will have nothing to predict from past the');
+      console.warn('last observed hour until the live poller refreshes it, which it does');
+      console.warn('every three hours without a redeploy.');
+    }
   } else {
     const i = process.argv.indexOf('--days');
     const days = i >= 0 ? Number(process.argv[i + 1]) || 90 : 90;

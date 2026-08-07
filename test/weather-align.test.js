@@ -599,3 +599,58 @@ test('the fueltech vocabulary is covered exactly', () => {
   // Curtailment aside, a coal station has no business being handed irradiance.
   assert.ok(!VARIABLES_BY_FUELTECH.coal_black.includes('shortwave_radiation'));
 });
+
+test('a transient network failure is retried rather than thrown at the caller', async () => {
+  // The failure this exists for: one ConnectTimeoutError to api.open-meteo.com
+  // ended a fifteen-minute deploy build that had already fetched every dispatch
+  // day, every archive weather file, the correlations and the backtest. Every
+  // other fetch in the harvester retried; this was the one that did not.
+  const real = globalThis.fetch;
+  let calls = 0;
+  globalThis.fetch = async () => {
+    calls++;
+    if (calls < 3) throw new Error('Connect Timeout Error');
+    return {
+      ok: true,
+      status: 200,
+      json: async () => ({
+        latitude: -33, longitude: 151,
+        hourly: { time: [1_700_000_000], temperature_2m: [21.5] },
+      }),
+    };
+  };
+  try {
+    const out = await fetchWeather({
+      stations: [{ station_id: 'ONE', lat: -33, lon: 151 }],
+      start: 1_700_000_000_000, end: 1_700_086_400_000,
+      variables: ['temperature_2m'],
+    });
+    assert.equal(calls, 3, 'it should have taken two retries to succeed');
+    assert.equal(out[0].variables.temperature_2m.values[0], 21.5);
+  } finally {
+    globalThis.fetch = real;
+  }
+});
+
+test('a rejected request is not retried, because the answer will not change', async () => {
+  const real = globalThis.fetch;
+  let calls = 0;
+  globalThis.fetch = async () => {
+    calls++;
+    return { ok: false, status: 400, statusText: 'Bad Request', json: async () => ({ error: true, reason: 'bad variable' }) };
+  };
+  try {
+    await assert.rejects(
+      fetchWeather({
+        stations: [{ station_id: 'ONE', lat: -33, lon: 151 }],
+        start: 1, end: 2, variables: ['nonsense'],
+      }),
+      /bad variable/,
+    );
+    // A malformed query answers the same way however many times it is asked;
+    // retrying it four times just makes the build four times slower to fail.
+    assert.equal(calls, 1);
+  } finally {
+    globalThis.fetch = real;
+  }
+});
