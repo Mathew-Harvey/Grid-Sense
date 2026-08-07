@@ -244,6 +244,24 @@ async function boot() {
   ctx.correlationById = loaded.correlationById ?? new Map();
   state.quality = qualityStrip(loaded);
   state.prices = loaded.prices ?? null;
+
+  // One price line for a whole-of-market chart, and the honest one is the plain
+  // mean across regions rather than a generation-weighted figure: weighting
+  // needs per-region generation on the same clock, and inventing that weighting
+  // would put a number on the axis that looks derived and is guessed. The panel
+  // says which it is.
+  if (loaded.prices?.byRegion?.size) {
+    const acc = new Map();
+    for (const { t, rrp } of loaded.prices.byRegion.values()) {
+      for (let i = 0; i < t.length; i++) {
+        const key = t[i];
+        const cell = acc.get(key);
+        if (cell) { cell.sum += rrp[i]; cell.n++; } else acc.set(key, { sum: rrp[i], n: 1 });
+      }
+    }
+    state.priceByMs = new Map([...acc].map(([k, v]) => [k, v.sum / v.n]));
+    state.priceRegions = loaded.prices.byRegion.size;
+  }
   scheduleRender();
 
   startWorker(loaded);

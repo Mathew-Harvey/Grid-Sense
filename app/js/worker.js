@@ -267,6 +267,16 @@ async function build(message) {
   const names = tracks[0].names;
   const fleetCapacity = tracks.reduce((a, t) => a + t.capacity, 0);
 
+  // Fuel and region indices are resolved once, here, so the per-interval loop
+  // does an array write rather than a string lookup. At 500 intervals a second
+  // across the fleet that difference is the frame budget.
+  const fueltechs = [...new Set(tracks.map((t) => t.fueltech))].sort();
+  const regions = [...new Set(tracks.map((t) => t.meta.region))].sort();
+  for (const t of tracks) {
+    t.fuelIndex = fueltechs.indexOf(t.fueltech);
+    t.regionIndex = regions.indexOf(t.meta.region);
+  }
+
   return {
     tracks,
     names,
@@ -290,7 +300,9 @@ async function build(message) {
     cursor: 0,
     scored: 0,
     curtailedIntervals: 0,
-    ring: makeRing(names.length),
+    ring: makeRing(names.length, fueltechs, regions),
+    fuelScratch: new Float64Array(fueltechs.length),
+    regionScratch: new Float64Array(regions.length),
     running: false,
     startedAt: 0,
     stepsDone: 0,
@@ -300,11 +312,19 @@ async function build(message) {
 
 /** The last day of everything the charts draw, kept as a ring so a frame is a
  *  copy of fixed size no matter how long the replay has been going. */
-function makeRing(expertCount) {
+function makeRing(expertCount, fueltechs = [], regions = []) {
+  const byFuel = {};
+  for (const ft of fueltechs) byFuel[ft] = new Float32Array(WINDOW).fill(NaN);
+  const byRegion = {};
+  for (const r of regions) byRegion[r] = new Float32Array(WINDOW).fill(NaN);
   return {
     head: 0,
     filled: 0,
     expertCount,
+    fueltechs: [...fueltechs],
+    regions: [...regions],
+    byFuel,
+    byRegion,
     t: new Float64Array(WINDOW),
     actual: new Float32Array(WINDOW).fill(NaN),
     forecast: new Float32Array(WINDOW).fill(NaN),
@@ -337,12 +357,23 @@ function step(state) {
 
   const fleetActual = { sum: 0, complete: true };
   let anyCurtailed = false;
+  const fuelSum = state.fuelScratch;
+  const regionSum = state.regionScratch;
+  fuelSum.fill(0);
+  regionSum.fill(0);
 
   for (const track of tracks) {
     const y = track.target[i];
     const usable = track.usable[i] === 1;
     if (!usable) fleetActual.complete = false;
-    if (Number.isFinite(y)) fleetActual.sum += y;
+    if (Number.isFinite(y)) {
+      fleetActual.sum += y;
+      // Same pass as the fleet total. Walking the fleet twice per interval is
+      // exactly the kind of thing that quietly eats the frame budget at 500
+      // intervals a second.
+      fuelSum[track.fuelIndex] += y;
+      regionSum[track.regionIndex] += y;
+    }
     if (track.curtailed[i] > 0) anyCurtailed = true;
 
     for (let h = 0; h < HORIZONS.length; h++) {
@@ -481,6 +512,13 @@ function recordFrame(state, i, fleetActual) {
   const k = ring.head;
   ring.t[k] = (state.t0 + i * MS_PER_STEP) / 1000;
   ring.actual[k] = fleetActual.sum;
+  // step() filled these for this interval; they are read here rather than
+  // passed, because the scratch buffers are reused every interval and copying
+  // them into an argument would allocate once per interval for nothing.
+  const fuel = state.fuelScratch;
+  const region = state.regionScratch;
+  for (let f = 0; f < ring.fueltechs.length; f++) ring.byFuel[ring.fueltechs[f]][k] = fuel[f];
+  for (let r = 0; r < ring.regions.length; r++) ring.byRegion[ring.regions[r]][k] = region[r];
 
   const display = state.fleet.slots[DISPLAY_HORIZON];
   const due = display.due;
@@ -652,8 +690,23 @@ function frame(state) {
     for (let b = 0; b < PIT_BINS; b++) pit[b] += slot.pit[b];
   }
 
+  const byFuel = {};
+  for (const ft of ring.fueltechs) {
+    const lane = new Float32Array(ring.filled);
+    for (let k = 0; k < ring.filled; k++) lane[k] = ring.byFuel[ft][(start + k) % WINDOW];
+    byFuel[ft] = lane;
+  }
+  const regionNow = {};
+  for (const r of ring.regions) {
+    const src = (ring.head - 1 + WINDOW) % WINDOW;
+    regionNow[r] = ring.byRegion[r][src];
+  }
+
   const payload = {
     type: 'frame',
+    byFuel,
+    regionNow,
+    regions: ring.regions,
     nowSec: (state.t0 + (state.cursor - 1) * MS_PER_STEP) / 1000,
     historyLength: ring.filled,
     expertCount: n,
@@ -671,7 +724,8 @@ function frame(state) {
 
   const transfer = [t.buffer, weights.buffer, expertCrps.buffer, crpsModel.buffer,
     crpsBase.buffer, cov90.buffer, cov80.buffer, pit.buffer, payload.stats.buffer,
-    ...Object.values(lanes).map((v) => v.buffer)];
+    ...Object.values(lanes).map((v) => v.buffer),
+    ...Object.values(byFuel).map((v) => v.buffer)];
   post(payload, transfer);
 }
 

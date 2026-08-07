@@ -7,6 +7,7 @@
 
 import { createConvictionBand, createExpertRibbon } from '../charts/conviction.js';
 import { fueltechColour, FUELTECH_CODE } from '../charts/base.js';
+import { intervalRevenue } from '../revenue.js';
 
 const fmt = (v, d = 0) => (Number.isFinite(v) ? v.toFixed(d) : '—');
 const gw = (mw) => (Number.isFinite(mw) ? (mw / 1000).toFixed(2) : '—');
@@ -120,28 +121,58 @@ export function mount(root, ctx) {
           `<td>${fmt(cr, 1)}</td><td>${Number.isFinite(cv) ? (cv * 100).toFixed(1) + '%' : '—'}</td></tr>`;
       }).join('');
 
-      if (state.fuelMix && optional.fuelmix) {
-        optional.fuelmix.update(keep.map((i) => f.t[i]), state.fuelMix);
-      } else {
-        el('fuelmix-note').textContent =
-          'Per-fuel totals are not carried in the replay frame yet — the worker aggregates the fleet, not the fuel split.';
+      // The fuel lanes cover scored history only, the same span as the weights.
+      if (optional.fuelmix && f.byFuel && hist > 0) {
+        const mix = {};
+        for (const [ft, lane] of Object.entries(f.byFuel)) {
+          mix[ft] = Array.from(lane.subarray(0, hist), (v) => (Number.isFinite(v) ? v : null));
+        }
+        optional.fuelmix.update(keep.slice(0, hist).map((i) => f.t[i]), mix);
+        el('fuelmix-note').textContent = `${Object.keys(mix).length} fuels, modelled fleet only`;
       }
 
-      if (optional.price && state.prices?.rrp) {
-        optional.price.overlay.update(keep.map((i) => f.t[i]), state.prices.rrp);
-        if (state.prices.revenue) {
-          optional.price.ribbon.update(keep.map((i) => f.t[i]), state.prices.revenue);
-        }
+      if (optional.price && state.priceByMs?.size) {
+        const times = keep.map((i) => f.t[i]);
+        // Frame timestamps are seconds; the price index is keyed in
+        // milliseconds, on the same five-minute grid.
+        const rrp = times.map((sec) => {
+          const v = state.priceByMs.get(sec * 1000);
+          return Number.isFinite(v) ? v : null;
+        });
+        optional.price.overlay.update(times, rrp);
+
+        // Revenue is the fleet's actual output valued at that price, over a
+        // five-minute interval — not MW times price, which is twelve times too
+        // large and still looks like money.
+        const revenue = times.map((_, k) => {
+          const mw = f.actual[keep[k]];
+          const price = rrp[k];
+          return Number.isFinite(mw) && Number.isFinite(price)
+            ? intervalRevenue({ outputMw: mw, rrp: price })
+            : 0;
+        });
+        optional.price.ribbon.update(times, revenue);
+        el('conviction-note').textContent =
+          `Price is the mean across ${state.priceRegions} NEM regions; revenue values the modelled fleet at it.`;
       } else if (optional.price) {
         el('conviction-note').textContent =
-          `Price overlay needs a full price backfill — ${state.priceDays ?? 0} of ${keep.length ? '21' : '0'} days cached.`;
+          'Price overlay is waiting on the price backfill — run harvester/backfill-price.js.';
       }
 
+      // Actual and share only. The replay calibrates one aggregate band for the
+      // whole fleet, so there is no per-region forecast or per-region skill to
+      // report — and apportioning the fleet's score across regions would put a
+      // number in the column that looks measured and is not.
       const regions = el('region-table').querySelector('tbody');
-      regions.innerHTML = (state.regions ?? []).map((r) => `
-        <tr><td>${r.region}</td><td>${gw(r.actual)}</td><td>${gw(r.forecast)}</td>
-        <td class="${r.skill > 0 ? 'pos' : ''}">${fmt(r.skill, 3)}</td></tr>`).join('')
-        || '<tr><td colspan="4">Regional totals appear once the replay has scored an interval.</td></tr>';
+      const names = f.regions ?? [];
+      const total = names.reduce((a, r) => a + (f.regionNow?.[r] || 0), 0);
+      regions.innerHTML = names.map((r) => {
+        const actual = f.regionNow?.[r];
+        const share = total > 0 && Number.isFinite(actual) ? (100 * actual) / total : NaN;
+        return `<tr><td>${r}</td><td>${gw(actual)}</td>` +
+          `<td>${Number.isFinite(share) ? share.toFixed(1) + '%' : '—'}</td></tr>`;
+      }).join('')
+        || '<tr><td colspan="3">Regional totals appear once the replay has scored an interval.</td></tr>';
 
       el('quality-strip').innerHTML = (state.quality ?? []).map((q) =>
         `<div><dt>${q.label}</dt><dd class="${q.warn ? 'warn' : ''}">${q.value}</dd></div>`).join('');
