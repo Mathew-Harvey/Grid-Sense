@@ -145,5 +145,5 @@ export function autoResize(plot, el) {
 // single ramp: hue is reserved for fueltech, and six competing colours here
 // would claim a meaning these series do not have.
 export const EXPERT_RAMP = [
-  '#3d4a52', '#4f6570', '#61818c', '#7ba0a6', '#9dbfb8', '#c6dcc9',
+  '#2a343a', '#33424a', '#3d5059', '#476069', '#516f78', '#5b7e88',
 ];

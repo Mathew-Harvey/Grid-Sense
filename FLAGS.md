@@ -345,7 +345,7 @@ tuned until the number looked acceptable.
 
 ---
 
-## F12 — The conviction band renders as two clusters instead of one continuous series
+## F12 — RESOLVED: the conviction band was mispositioned by a missing stylesheet
 
 **The app now runs**, loads 55 stations over 6,048 intervals in about 8 seconds,
 and produces live skill scores. But the signature element does not draw
@@ -376,5 +376,34 @@ not to adjust the chart.
 first thing the eye lands on, because there is nothing to land on. Loop E is
 also still unmeasured.
 
-**Status:** open, reproducible, with the next diagnostic named. Recorded rather
-than left as a chart that merely looks unfinished.
+**Actual cause, found by measuring the DOM rather than reading the code.** Every
+hypothesis above was wrong, and each was wrong in a way that still fitted the
+symptom — which is why measuring settled it and reasoning did not.
+
+The frame payload was healthy throughout: 288 history points, zero bad
+timestamps, a 47.9-hour span, sane magnitudes (actual peaking at 17,414 MW).
+The plot instance was healthy too: 293 x-points, correct scales, correct size.
+The chart was drawing correctly. It was drawing **in the wrong place**.
+
+`#conviction-band` sat at y=222 with height 300. Its canvas sat at **y=455** —
+233 px below its own wrapper, so `overflow: hidden` clipped all but the last
+sliver. uPlot positions its canvas absolutely inside `.u-wrap`, and **its
+stylesheet had never been linked**, so the canvas anchored to the wrong
+ancestor. Every chart in the application was displaced by the same amount for
+the same reason; the band was simply the one where it was obvious.
+
+Linking `uPlot.min.css` put the canvas at y=222, exactly matching its host.
+
+**Two real defects were found on the way and are worth keeping separately:**
+
+- The aggregate band was never clipped to physically possible values, which the
+  interval always owed the reader. Before the aggregate conformal calibrates its
+  upper edge runs far past anything the fleet can generate. Clipping it also
+  moved **24-hour skill from −0.109 to +0.128**, so this was a modelling defect
+  wearing a visual costume.
+- The expert ribbon indexed the weights array across the forward fan, where no
+  weights exist because nothing has been scored at those instants yet. It ran
+  off the end of the array and drew a wedge of NaN.
+
+**Status:** resolved. The band now renders actual, forecast, the 80% and 90%
+bands, the ghost band and the now-rule across 48 hours.

@@ -69,7 +69,25 @@ export function createConvictionBand(el, { getNowSec, showGhost = true } = {}) {
       // Power cannot be negative in aggregate, and anchoring the axis at zero
       // stops a band that is merely narrow from looking like a band that is
       // wide, purely because the axis rescaled under it.
-      y: { range: (u, min, max) => [0, max * 1.05] },
+      //
+      // The ceiling comes from the series being compared — actual and forecast —
+      // not from the outer edge of the band. Before the aggregate conformal has
+      // calibrated its upper band runs several times higher than anything the
+      // fleet can produce, and ranging over that puts 17 GW of real generation
+      // in the bottom eighth of the panel. The band is still drawn where it
+      // falls; it simply no longer decides the scale. Headroom is generous
+      // enough that an honestly wide band stays visible.
+      y: {
+        range: (u) => {
+          let peak = 0;
+          for (const i of [1, 2]) {
+            const lane = u.data[i];
+            if (!lane) continue;
+            for (const v of lane) if (Number.isFinite(v) && v > peak) peak = v;
+          }
+          return peak > 0 ? [0, peak * 1.35] : [0, 1];
+        },
+      },
       // Pinned to the data rather than left to auto-range. One stray timestamp
       // — a reserved forward slot that was never stamped, a lane still holding
       // its fill value — stretches the axis and squeezes every real interval

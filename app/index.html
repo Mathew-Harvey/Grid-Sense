@@ -4,6 +4,10 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>GridSense — weather against the Australian grid</title>
+<!-- uPlot positions its canvas absolutely inside .u-wrap; without its own
+     stylesheet the canvas anchors to the wrong ancestor and every chart draws
+     offset from the panel it belongs to. -->
+<link rel="stylesheet" href="/vendor/uplot/dist/uPlot.min.css">
 <link rel="stylesheet" href="./css/app.css">
 </head>
 <body>

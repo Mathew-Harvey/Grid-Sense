@@ -59,28 +59,48 @@ export function mount(root, ctx) {
       // edge — the chart looks broken when only one number is.
       const keep = [];
       for (let i = 0; i < f.t.length; i++) if (f.t[i] > 0) keep.push(i);
-      const pick = (lane) => keep.map((i) => {
+
+      // The fleet cannot generate more than it is built to. Before the
+      // aggregate conformal has calibrated, its upper band runs far past that,
+      // and because the y-axis ranges over every series the whole chart then
+      // scales to an impossible number — 17 GW of real generation ends up
+      // squashed into the bottom eighth of the panel by a band edge that could
+      // never happen. Clipping is what the interval always owed the reader; the
+      // legibility is a consequence, not the reason.
+      const ceiling = state.stats?.fleetCapacity > 0
+        ? state.stats.fleetCapacity
+        : Infinity;
+      const pick = (lane, clip = false) => keep.map((i) => {
         const v = lane[i];
-        return Number.isFinite(v) ? v : null;
+        if (!Number.isFinite(v)) return null;
+        return clip ? Math.min(Math.max(v, 0), ceiling) : v;
       });
 
       band.update({
         t: keep.map((i) => f.t[i]),
         actual: pick(f.actual), forecast: pick(f.forecast),
-        hi90: pick(f.hi90), lo90: pick(f.lo90),
-        hi80: pick(f.hi80), lo80: pick(f.lo80),
-        ghostHi: pick(f.ghostHi), ghostLo: pick(f.ghostLo),
+        hi90: pick(f.hi90, true), lo90: pick(f.lo90, true),
+        hi80: pick(f.hi80, true), lo80: pick(f.lo80, true),
+        ghostHi: pick(f.ghostHi, true), ghostLo: pick(f.ghostLo, true),
       });
 
-      if (f.weights && ctx.expertNames?.length) {
+      // Weights exist only for scored history. The forward fan has no weights
+      // yet — nothing has been scored at those instants — so indexing across the
+      // whole series runs off the end of the array and turns the ribbon into a
+      // wedge of NaN. The ribbon covers what has actually been learned from.
+      const hist = Math.min(f.historyLength ?? 0, keep.length);
+      if (f.weights && ctx.expertNames?.length && hist > 0) {
         const n = ctx.expertNames.length;
         const per = [];
         for (let e = 0; e < n; e++) {
-          const lane = new Array(keep.length);
-          for (let i = 0; i < keep.length; i++) lane[i] = f.weights[keep[i] * n + e];
+          const lane = new Array(hist);
+          for (let i = 0; i < hist; i++) {
+            const v = f.weights[i * n + e];
+            lane[i] = Number.isFinite(v) ? v : null;
+          }
           per.push(lane);
         }
-        ribbon.update(keep.map((i) => f.t[i]), per);
+        ribbon.update(keep.slice(0, hist).map((i) => f.t[i]), per);
       }
 
       const s = state.stats ?? {};
@@ -100,11 +120,21 @@ export function mount(root, ctx) {
           `<td>${fmt(cr, 1)}</td><td>${Number.isFinite(cv) ? (cv * 100).toFixed(1) + '%' : '—'}</td></tr>`;
       }).join('');
 
-      if (state.fuelMix && optional.fuelmix) optional.fuelmix.update(f.t, state.fuelMix);
+      if (state.fuelMix && optional.fuelmix) {
+        optional.fuelmix.update(keep.map((i) => f.t[i]), state.fuelMix);
+      } else {
+        el('fuelmix-note').textContent =
+          'Per-fuel totals are not carried in the replay frame yet — the worker aggregates the fleet, not the fuel split.';
+      }
 
       if (optional.price && state.prices?.rrp) {
-        optional.price.overlay.update(f.t, state.prices.rrp);
-        if (state.prices.revenue) optional.price.ribbon.update(f.t, state.prices.revenue);
+        optional.price.overlay.update(keep.map((i) => f.t[i]), state.prices.rrp);
+        if (state.prices.revenue) {
+          optional.price.ribbon.update(keep.map((i) => f.t[i]), state.prices.revenue);
+        }
+      } else if (optional.price) {
+        el('conviction-note').textContent =
+          `Price overlay needs a full price backfill — ${state.priceDays ?? 0} of ${keep.length ? '21' : '0'} days cached.`;
       }
 
       const regions = el('region-table').querySelector('tbody');

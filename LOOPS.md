@@ -83,14 +83,18 @@ Measured on renewables, median across stations.
 **Exit:** three consecutive passes with no rubric failure, minimum three passes.
 **Max passes:** 7. Screenshots saved to `screenshots/loop-d-pass-N/`.
 
-**Running — 1 rubric failure outstanding.** The app boots, loads and renders;
-five passes have cleared four classes of defect. The remaining failure is rubric
-item 5: the conviction band draws as two separated clusters rather than one
-series, recorded with its diagnosis in FLAGS F12. Screenshots for every pass are
-in `screenshots/loop-d-pass-N/` at 1440, 1024 and 390 px.
+**Running — 2 rubric failures outstanding.** The conviction band is fixed and is
+now the centrepiece it was meant to be. The app boots, loads and renders;
+five passes have cleared four classes of defect. The two remaining failures are the fuel-mix and
+region panels, which have no data source: the replay worker aggregates the fleet
+and does not carry a per-fuel or per-region split. Both say so on the page rather
+than sitting blank. Screenshots for every pass are in `screenshots/loop-d-pass-N/`
+at 1440, 1024 and 390 px.
 
 | Pass | Rubric failures | Change made |
 |---|---|---|
+| 7 | 2 — fuel mix and regions have no data source | Ran the price backfill: 21 days, and the real range is what the symlog axis was built for — SA1 from −$204 to $16,971 with 1,541 negative intervals, TAS1 peaking at $23,200, VIC1 down to −$757. |
+| 6 | 3 | **Root cause found by measuring the DOM.** uPlot's stylesheet had never been linked, so every canvas was positioned 233 px below its own container and clipped. The band, and every other chart, had been drawing correctly in the wrong place the whole time (FLAGS F12). Also clipped the aggregate band to fleet capacity, which moved 24h skill from −0.109 to **+0.128**; and bounded the expert ribbon to scored history, which had been indexing past the end of the weights array. |
 | 5 | 1 — rubric 5 (conviction band) | Pinned the x-scale to the finite data extent. No change, which is what established the gap is in the data rather than the scale (FLAGS F12). |
 | 4 | 2 — rubric 5, plus notes rendering as `[object Object]` | Trimmed zero timestamps; fixed note rendering so the data-quality strip carries real direction ("Weather stops at 2026-07-31, 5 days short of dispatch"). |
 | 3 | 3 | Reliability diagram was being handed histogram counts where it expects `{nominal, empirical}`. Console errors fell from 68 to 13, and the 13 remaining are 404s for a date past the end of the backfill. |
