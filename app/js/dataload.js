@@ -47,26 +47,6 @@ const isoDay = (ms) => new Date(ms).toISOString().slice(0, 10);
 const dayMsOf = (iso) => Date.parse(`${iso}T00:00:00Z`);
 
 /**
- * What a stored manifest already covers, per feed.
- *
- * The two sets are deliberately independent, and that independence is the
- * substance of this function rather than an implementation detail. A cached day
- * means the eastern stations were stored for it; the SWIS stations come from a
- * different feed, under different keys, and may well not have been. Reading one
- * set for both meant a browser that loaded the site before Western Australia
- * was deployed skipped the WA fetch on every cached day for good — reporting
- * "no Western Australian dispatch" at a server that was serving it, with no way
- * out but clearing site data. See FLAGS F19.
- *
- * A manifest written before WA existed has no `wem_days`, which reads as
- * nothing covered, so those browsers repair themselves on the next load instead
- * of needing the whole 21-day dispatch window re-fetched behind a version bump.
- *
- * @param {object|null} cached the stored manifest, or null to ignore the cache
- * @param {number} stationCount modelled stations now, to detect a changed fleet
- * @returns {{days: Set<string>, wemDays: Set<string>}}
- */
-/**
  * Join the reanalysis archive to the forward forecast for one station.
  *
  * Where both cover an hour, the archive wins: ERA5 is a reanalysis of what
@@ -99,6 +79,26 @@ export function mergeWeatherSources(archive, forecast) {
   return { ...archive, variables, forecast_issued_at: forecast.issued_at ?? null };
 }
 
+/**
+ * What a stored manifest already covers, per feed.
+ *
+ * The two sets are deliberately independent, and that independence is the
+ * substance of this function rather than an implementation detail. A cached day
+ * means the eastern stations were stored for it; the SWIS stations come from a
+ * different feed, under different keys, and may well not have been. Reading one
+ * set for both meant a browser that loaded the site before Western Australia
+ * was deployed skipped the WA fetch on every cached day for good — reporting
+ * "no Western Australian dispatch" at a server that was serving it, with no way
+ * out but clearing site data. See FLAGS F19.
+ *
+ * A manifest written before WA existed has no `wem_days`, which reads as
+ * nothing covered, so those browsers repair themselves on the next load instead
+ * of needing the whole 21-day dispatch window re-fetched behind a version bump.
+ *
+ * @param {object|null} cached the stored manifest, or null to ignore the cache
+ * @param {number} stationCount modelled stations now, to detect a changed fleet
+ * @returns {{days: Set<string>, wemDays: Set<string>}}
+ */
 export function cachedCoverage(cached, stationCount) {
   const usable = Boolean(cached)
     && cached.version === CACHE_VERSION
@@ -127,14 +127,44 @@ async function exists(url) {
 }
 
 /**
+ * What the harvester has actually published, per day-keyed directory.
+ *
+ * Asked for once, instead of discovering it by requesting files and watching
+ * which ones 404. The probing worked, but it painted the console red on every
+ * single load — the newest day is found by asking for a file that is not there
+ * yet, by design — and a console that is always red is one nobody reads, in
+ * which the 404 that does matter is invisible. That cost real diagnosis time.
+ *
+ * A server too old to serve the index answers 404 and the probes come back, so
+ * this is an optimisation rather than a requirement.
+ */
+async function dataIndex() {
+  const index = await fetchJson(`${DATA}/index.json`).catch(() => null);
+  if (!index) return null;
+  const sets = {};
+  for (const [dir, days] of Object.entries(index)) sets[dir] = new Set(days);
+  return { index, sets };
+}
+
+/**
  * The most recent published dispatch day.
  *
- * There is no directory listing to read, so the newest day is found by walking
- * back from today. The harvester runs daily and the file lands early the next
- * morning, so the answer is nearly always zero or one day back; the wider reach
- * covers a harvester that has been down over a weekend.
+ * Taken from the index when the server offers one. The fallback walks back from
+ * today, which is what this did before the index existed: the harvester runs
+ * daily and the file lands early the next morning, so the answer is nearly
+ * always zero or one day back, and the wider reach covers a harvester that has
+ * been down over a weekend.
  */
-async function newestDay(todayMs) {
+async function newestDay(todayMs, available) {
+  const published = available?.index?.['nem-dispatch'];
+  if (published?.length) {
+    // Not simply the last entry: a directory can hold a day further ahead than
+    // the clock if the machine's date is off, and the replay must not start
+    // from a day that has not happened.
+    const today = isoDay(todayMs);
+    const usable = published.filter((iso) => iso <= today);
+    if (usable.length) return usable.at(-1);
+  }
   for (let back = 0; back < 10; back++) {
     const iso = isoDay(todayMs - back * MS_PER_DAY);
     if (await exists(`${DATA}/nem-dispatch/${iso}.json`)) return iso;
@@ -276,7 +306,7 @@ function packWeather(rows, lanes) {
  * Held in memory rather than IndexedDB: five regions at 5-minute resolution over
  * three weeks is 30,000 numbers, which is smaller than the cost of storing it.
  */
-async function loadPrices(days, notes) {
+async function loadPrices(days, notes, available) {
   const byRegion = new Map();
   let summary = null;
   let loaded = 0;
@@ -287,7 +317,10 @@ async function loadPrices(days, notes) {
     // A summary is a convenience, not a prerequisite.
   }
 
+  const published = available?.sets?.prices;
   for (const day of days) {
+    // Skip what the index says is not there, rather than asking and being told.
+    if (published && !published.has(day.iso)) continue;
     let file;
     try {
       file = await fetchJson(`${DATA}/prices/${day.iso}.json`);
@@ -401,7 +434,8 @@ export async function loadAll({ days = DEFAULT_DAYS, force = false, onProgress =
 
   // ---- which days -------------------------------------------------------
   report('dispatch', 'Finding the most recent published day', 0, 1);
-  const newest = await newestDay(Date.now());
+  const available = await dataIndex();
+  const newest = await newestDay(Date.now(), available);
   if (!newest) {
     notes.push({
       source: 'dispatch',
@@ -586,12 +620,16 @@ export async function loadAll({ days = DEFAULT_DAYS, force = false, onProgress =
   }
   report('weather', 'Weather stored', stations.length, stations.length);
 
+  const publishedFlows = available?.sets?.flows;
   // ---- regional demand and interconnector flow --------------------------
   // Small enough to hold in memory: five regions and six interconnectors at
   // five-minute resolution over three weeks is about 70,000 numbers.
   const flows = new Map();
   let flowDays = 0;
   for (const day of loadedDays) {
+    // The index already says which days exist; asking for the rest only
+    // paints the console red on a state the interface reports calmly.
+    if (publishedFlows && !publishedFlows.has(day.iso)) continue;
     let file;
     try {
       file = await fetchJson(`${DATA}/flows/${day.iso}.json`);
@@ -612,7 +650,7 @@ export async function loadAll({ days = DEFAULT_DAYS, force = false, onProgress =
 
   // ---- prices -----------------------------------------------------------
   report('prices', 'Regional prices', 0, 1);
-  const prices = await loadPrices(loadedDays, notes);
+  const prices = await loadPrices(loadedDays, notes, available);
   report('prices', 'Regional prices', 1, 1);
 
   await setMeta('manifest', {

@@ -740,3 +740,44 @@ Consequences, all taken rather than worked around:
 
   The original poll-shaped implementation is kept: `pollWem` and `pollWindow`
   are correct for what they do and are what a future live WA feed would use.
+
+## F20 — a station whose weather could never be served
+
+`safeFileName` percent-encodes AEMO identifiers because they are not
+filesystem-safe: Gladstone registers as `G/STONE`, so its weather is written to
+disk as `G%2FSTONE.json` and the app asks for exactly that path. The server
+decoded the request path before resolving it, turning `%2F` back into a
+directory separator and looking for `STONE.json` inside a directory named `G`.
+There is no such directory, so the request 404ed.
+
+Gladstone therefore ran its physical and analogue experts on output alone, for
+the whole life of the project. Nothing looked broken: no panel was missing, no
+error was raised, the station appeared in every table, and the only trace was a
+404 in a console that carried several other 404s by design.
+
+The server now tries the decoded path and the raw one. `test/serve.test.js`
+asserts the encoded identifier resolves, and asserts separately that a path
+still cannot climb out of its root — the fix widens what is reachable, which is
+exactly the change that needs the traversal guard re-asserted rather than
+assumed.
+
+It is the only affected station today, and only because it is the only modelled
+identifier containing a character `encodeURIComponent` escapes. The registry
+holds others — `W/HOE#1` — that would have hit it the moment they were modelled.
+
+## F21 — expected 404s were hiding real ones
+
+The app discovered what the harvester had published by requesting files and
+seeing which ones failed: the newest dispatch day was found by asking for
+today's file, which by design does not exist yet. That worked, and it painted
+the console red on every single load — enough 404s that F20 sat in plain sight
+and was read as more of the same.
+
+`serve.js` now answers `/data/index.json` with what each day-keyed directory
+actually holds, and the app asks once instead of probing. A favicon is inlined
+as a data URI so the browser never requests one. Measured after: a full load
+makes zero failed requests, against a console that previously carried a dozen.
+
+Recorded because the cost was diagnostic, not functional. Twice in one session a
+real fault was mistaken for expected noise, and the fix is not "read the console
+more carefully" — it is to leave nothing in it that does not matter.

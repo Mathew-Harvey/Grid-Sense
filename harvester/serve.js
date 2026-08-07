@@ -75,9 +75,39 @@ async function serveFile(res, filePath) {
   }
 }
 
+// Day-keyed directories the app would otherwise discover by asking for files
+// and seeing which ones 404. That works, but it fills the console with red on
+// every load — and a console that is always red is a console nobody reads, in
+// which the one 404 that matters is invisible. One listing answers it instead.
+const INDEXED = ['nem-dispatch', 'wem-dispatch', 'prices', 'flows'];
+
+async function dataIndex() {
+  const out = {};
+  await Promise.all(INDEXED.map(async (dir) => {
+    try {
+      out[dir] = (await fs.readdir(path.join(DATA_DIR, dir)))
+        .filter((n) => /^\d{4}-\d{2}-\d{2}\.json$/.test(n))
+        .map((n) => n.slice(0, -'.json'.length))
+        .sort();
+    } catch {
+      // A directory the build never produced is an empty list, not an error:
+      // the app has to render something sensible either way, and "no flows"
+      // is exactly as true as "flows we could not read".
+      out[dir] = [];
+    }
+  }));
+  return out;
+}
+
 export const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, 'http://localhost');
   const pathname = decodeURIComponent(url.pathname);
+
+  if (pathname === '/data/index.json') {
+    res.writeHead(200, { ...CORS, 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-cache' });
+    res.end(JSON.stringify(await dataIndex()));
+    return;
+  }
 
   // Ahead of the directory roots, so a stale file left in data/ by an older
   // build cannot shadow the tracked one.
@@ -100,17 +130,27 @@ export const server = http.createServer(async (req, res) => {
     return;
   }
 
-  // Path traversal guard: resolve, then confirm the result is still inside the
-  // directory it was meant to be inside.
-  const roots = pathname.startsWith('/data/')
-    ? [[DATA_DIR, pathname.slice('/data'.length)]]
-    : pathname.startsWith('/vendor/')
-      ? [[NODE_MODULES, pathname.slice('/vendor'.length)]]
-      : [[APP_DIR, pathname === '/' ? '/index.html' : pathname]];
+  // Where a request path maps to on disk. Path traversal guard: resolve, then
+  // confirm the result is still inside the directory it was meant to be inside.
+  const rootFor = (p) => (
+    p.startsWith('/data/') ? [DATA_DIR, p.slice('/data'.length)]
+      : p.startsWith('/vendor/') ? [NODE_MODULES, p.slice('/vendor'.length)]
+        : [APP_DIR, p === '/' ? '/index.html' : p]
+  );
 
-  for (const [root, rel] of roots) {
+  // The decoded path first, then the raw one.
+  //
+  // AEMO identifiers are not filesystem-safe — Gladstone registers as "G/STONE"
+  // — so the harvester percent-encodes them and the file on disk is literally
+  // `G%2FSTONE.json`. Decoding the request path turned that back into a
+  // directory separator and looked for STONE.json inside a directory G, which
+  // does not exist. Gladstone's weather was unreachable, and the only symptom
+  // was one station quietly running its physical and analogue experts on output
+  // alone — no error, no missing panel, just a slightly worse forecast.
+  for (const p of new Set([pathname, url.pathname])) {
+    const [root, rel] = rootFor(p);
     const resolved = path.resolve(root, '.' + rel);
-    if (!resolved.startsWith(path.resolve(root))) break;
+    if (!resolved.startsWith(path.resolve(root))) continue;
     if (await serveFile(res, resolved)) return;
   }
 

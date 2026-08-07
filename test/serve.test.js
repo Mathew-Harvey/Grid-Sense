@@ -92,3 +92,31 @@ test('an escape from the data root is refused', async () => {
   const res = await get('/data/%2e%2e/harvester/serve.js');
   assert.equal(res.status, 404);
 });
+
+test('a percent-encoded station id resolves to the file the harvester wrote', async () => {
+  // Gladstone registers as "G/STONE", so safeFileName writes G%2FSTONE.json and
+  // the app asks for exactly that. Decoding the path first looked for
+  // STONE.json inside a directory named G, and the station lost its weather
+  // with no visible symptom beyond a slightly worse forecast.
+  const res = await get('/data/weather/G%2FSTONE.json');
+  assert.equal(res.status, 200);
+  assert.equal((await res.json()).station_id, 'G/STONE');
+});
+
+test('the data index lists what each day-keyed directory holds', async () => {
+  const res = await get('/data/index.json');
+  assert.equal(res.status, 200);
+  const index = await res.json();
+  for (const dir of ['nem-dispatch', 'wem-dispatch', 'prices', 'flows']) {
+    assert.ok(Array.isArray(index[dir]), `${dir} must be listed, even if empty`);
+    for (const iso of index[dir]) assert.match(iso, /^\d{4}-\d{2}-\d{2}$/);
+    assert.deepEqual(index[dir], [...index[dir]].sort(), `${dir} must be sorted`);
+  }
+});
+
+test('a path cannot climb out of the directory it names', async () => {
+  for (const attempt of ['/data/../package.json', '/data/%2e%2e/package.json']) {
+    const res = await get(attempt);
+    assert.notEqual(res.status, 200, `${attempt} must not be served`);
+  }
+});
