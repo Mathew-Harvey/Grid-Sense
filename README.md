@@ -26,7 +26,7 @@ forecasts see turbine-level telemetry this system does not.
 harvester/   Node data layer: fetch, parse, normalise, reconcile, backfill, serve
 app/         the dashboard: plain JS + uPlot, no framework, no build step
 data/        harvester output (gitignored, rebuilt by the backfill commands)
-test/        node:test suites — 183 tests
+test/        node:test suites — 185 tests
 tools/       screenshot harness for the visual iteration loop
 ```
 
@@ -98,11 +98,17 @@ at the repo and it will pick it up, or create the service by hand.
 |---|---|
 | Service type | Web Service |
 | Runtime | Node |
-| Build command | `npm install && node harvester/backfill.js --backfill 21 && node harvester/backfill-weather.js --days 90 && node harvester/backfill-price.js --days 21 && node harvester/correlate-run.js --days 21 && node harvester/backtest.js --days 21` |
+| Build command | `npm install && node harvester/backfill.js --backfill 21 && node harvester/backfill-weather.js --days 90 && node harvester/backfill-price.js --days 21 && node harvester/correlate-run.js --days 21 && node harvester/build-wem-codes.js && node harvester/backfill-wem.js --days 21 && node harvester/backfill-flows.js --days 21 && node harvester/backtest.js --days 21` |
 | Start command | `node harvester/serve.js` |
 | Health check path | `/` |
 | Instance | Starter is enough — see memory note |
 | Environment variable | `NODE_OPTIONS` = `--max-old-space-size=1536` |
+
+**If you created the service by hand, the build command must be updated when
+new backfill steps are added** — the blueprint is not consulted for a service
+that already exists. Western Australian dispatch and the map's demand and flow
+data each need their own step, and a stale build command shows up as those
+panels 404ing while everything else works.
 
 The server honours `PORT`, which Render sets automatically. The final
 `backtest.js` step pre-computes the skill matrix so the dashboard shows scores

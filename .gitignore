@@ -1,5 +1,8 @@
 node_modules/
-data/
+# Anchored to the repo root. Without the leading slash this also matched
+# app/data/, which is committed source — and the map's coastline geometry
+# silently never reached a deploy because of it.
+/data/
 *.log
 app/node_modules
 # Copied in by the static-site build command; the served path maps to

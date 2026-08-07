@@ -10,7 +10,12 @@
 
 import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
+import { execSync } from 'node:child_process';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { server } from '../harvester/serve.js';
+
+const HERE = path.dirname(fileURLToPath(import.meta.url));
 
 // Port 0: the OS picks a free one, so the suite cannot fail because a
 // development server happens to be running on the usual port.
@@ -34,6 +39,34 @@ test('the registry serves from /data even though no build step writes it there',
   // these would leave the dashboard empty with no error to show.
   const modelled = registry.stations.filter((s) => s.modelled && s.located && s.capacity_mw > 0);
   assert.ok(modelled.length > 0, 'no station survives the loader\'s filter');
+});
+
+// Committed source the app fetches at boot. Neither is harvester output, so
+// neither is rebuilt by a deploy — if one is missing from the repository it is
+// missing from production, and the only symptom is a panel that does not draw.
+// This is the second time that has happened: the registry was a hand-made
+// symlink, and the map's coastline sat under app/data/, which an unanchored
+// `data/` line in .gitignore quietly excluded.
+test('every committed file the app boots from is tracked in git', () => {
+  const tracked = execSync('git ls-files', { cwd: path.join(HERE, '..'), encoding: 'utf8' })
+    .split('\n');
+  for (const file of ['harvester/registry.json', 'app/data/au-states.json']) {
+    assert.ok(tracked.includes(file),
+      `${file} is fetched by the app but is not in the repository, so no deploy can serve it`);
+  }
+});
+
+test('the map geometry serves and carries the states the map draws', async () => {
+  const res = await get('/data/au-states.json');
+  assert.equal(res.status, 200, 'the map cannot draw a coastline without this');
+  const { states } = await res.json();
+  const names = states.map((s) => s.name);
+  for (const required of ['New South Wales', 'Queensland', 'Victoria', 'South Australia',
+    'Tasmania', 'Western Australia']) {
+    assert.ok(names.includes(required), `no geometry for ${required}`);
+    const state = states.find((s) => s.name === required);
+    assert.ok(state.rings?.[0]?.length > 20, `${required} has no usable outline`);
+  }
 });
 
 test('the app shell serves at the root', async () => {

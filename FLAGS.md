@@ -636,3 +636,37 @@ as the replay runs, which is the whole point of it.
 **Status:** resolved. The untestable-by-construction class of defect is closed
 for this module; other chart modules still hold logic behind the same import and
 have not been audited.
+
+---
+
+## F16 — The map's coastline was gitignored, so it existed only on my machine
+
+The map deployed with everything working except the map: stations, demand and
+flow all fetched, and `/data/au-states.json` returned a 404 body. It renders
+locally, which is exactly what made it worth writing down.
+
+`.gitignore` carried `data/` with no leading slash. Git treats that as "any
+directory named data, at any depth", so it silently covered `app/data/` —
+where the simplified state boundaries live, because they are committed source
+rather than harvester output. The file was never added, no deploy could serve
+it, and nothing said so.
+
+This is the second time a file the app boots from turned out to exist only in
+development. F14 was the registry, present via a hand-made symlink. Both had
+the same shape: the environment under test contained something the repository
+could not produce, so local success said nothing about production.
+
+**Fix.** The ignore is anchored (`/data/`), the geometry is tracked, and
+`test/serve.test.js` now asserts that every committed file the app fetches at
+boot appears in `git ls-files`. That test fails against the previous commit,
+and it is written to be extended as more such files appear rather than to
+check these two forever.
+
+A second, unrelated cause of 404s on the same deploy: the Render service was
+created by hand, so its build command is a stored string that a blueprint
+update does not touch. Three new backfill steps existed in `render.yaml` and
+not on the running service, which is why the WA and flow data were missing
+while everything older worked. The README now says so at the point where
+someone would hit it.
+
+**Status:** resolved, with the class closed by a test rather than by care.

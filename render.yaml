@@ -17,6 +17,9 @@ services:
       node harvester/backfill-weather.js --days 90 &&
       node harvester/backfill-price.js --days 21 &&
       node harvester/correlate-run.js --days 21 &&
+      node harvester/build-wem-codes.js &&
+      node harvester/backfill-wem.js --days 21 &&
+      node harvester/backfill-flows.js --days 21 &&
       node harvester/backtest.js --days 21
     startCommand: node harvester/serve.js
     healthCheckPath: /
