@@ -283,3 +283,34 @@ test('a harvester still catching up says so rather than reporting a stale interv
   const status = { ok: true, manifest: { starting: true, feeds: { nem: { latest_at: 1 } } } };
   assert.match(describeLive(status, 2_000_000_000_000), /catching up/);
 });
+
+// --- what a small instance is allowed to do --------------------------------
+
+test('the heavy feeds are off by default and the budget says so', async () => {
+  // Run in a child process: the flags are read once at module load, so a test
+  // that set process.env would be asserting against whatever loaded first.
+  const { execFileSync } = await import('node:child_process');
+  const run = (env) => execFileSync(process.execPath, [
+    '-e', "import('./harvester/live.js').then(m => console.log(m.describeBudget()))",
+  ], { env: { ...process.env, ...env }, encoding: 'utf8' }).trim();
+
+  // 512 MB is the smallest Render plan, and the one that was killed. Neither
+  // whole-file parse fits in it, so neither may be on without being asked for.
+  const small = run({ GRIDSENSE_MEMORY_MB: '512' });
+  assert.match(small, /WA 5-minute off/);
+  assert.match(small, /next-day settle off/);
+  assert.match(small, /raise GRIDSENSE_MEMORY_MB/, 'a disabled feed must say how to enable it');
+
+  const large = run({ GRIDSENSE_MEMORY_MB: '2048' });
+  assert.match(large, /WA 5-minute on/);
+  assert.match(large, /next-day settle on/);
+
+  // An explicit request beats the budget in both directions.
+  assert.match(run({ GRIDSENSE_MEMORY_MB: '512', GRIDSENSE_WA_LIVE: '1' }), /WA 5-minute on/);
+  assert.match(run({ GRIDSENSE_MEMORY_MB: '2048', GRIDSENSE_NEXTDAY: '0' }), /next-day settle off/);
+
+  // Retention is disk rather than heap, but a full disk kills the service just
+  // as dead, so it follows the same budget.
+  assert.match(small, /keeping 12h/);
+  assert.match(large, /keeping 36h/);
+});

@@ -17,7 +17,15 @@ services:
     # pasted into the dashboard by hand — and the stage that gets forgotten
     # shows up as one panel silently 404ing. One indirection fixes that for good.
     buildCommand: npm install && npm run build:data
-    startCommand: node harvester/serve.js
+    # The heap cap is on the start command, not in NODE_OPTIONS, and that is
+    # the whole point. NODE_OPTIONS is a service variable, so the 1536 MB the
+    # build needs was also being handed to the running server — on a 512 MB
+    # instance V8 then believed it had three times the memory that existed,
+    # never collected under pressure, and grew until the container killed it.
+    # Every request 502s and nothing in the application log says why. A flag on
+    # the command line beats NODE_OPTIONS, so the build keeps its headroom and
+    # the server is held to what the instance actually has.
+    startCommand: node --max-old-space-size=384 harvester/serve.js
     healthCheckPath: /
     envVars:
       # The dispatch parse holds a ~120 MB CSV and its row objects at once, and
@@ -25,3 +33,9 @@ services:
       # is closer to that peak than a build should run.
       - key: NODE_OPTIONS
         value: --max-old-space-size=1536
+      # What the running instance actually has. The poller reads this to decide
+      # whether it can afford the two feeds that parse a whole file at once;
+      # below 1024 it declines them rather than being killed by them. Raise it
+      # to match the plan if you size up.
+      - key: GRIDSENSE_MEMORY_MB
+        value: "512"

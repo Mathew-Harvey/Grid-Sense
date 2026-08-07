@@ -13,6 +13,8 @@
 
 import http from 'node:http';
 import fs from 'node:fs/promises';
+import { createReadStream } from 'node:fs';
+import { pipeline } from 'node:stream/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -58,21 +60,51 @@ const ALIASES = {
 // are CORS "simple requests", so no preflight route is needed.
 const CORS = { 'access-control-allow-origin': '*' };
 
+/**
+ * Serve a file by streaming it.
+ *
+ * Streamed rather than read into a Buffer, and the reason is the instance's
+ * memory rather than elegance. A dispatch day is 30 MB, and the app asks for
+ * twenty-one of them on a cold load; `readFile` holds each whole file in memory
+ * for as long as the response takes to go out, so a handful of simultaneous
+ * visitors on a mobile connection is hundreds of megabytes of Buffer at once.
+ *
+ * Buffers are allocated outside V8's heap, so `--max-old-space-size` does not
+ * bound them — they count only against the container, which does not raise an
+ * error when it runs out. It kills the process, every request 502s, and the
+ * application log ends mid-sentence with nothing that looks like a cause.
+ *
+ * Streaming holds one chunk at a time regardless of file size or concurrency.
+ */
 async function serveFile(res, filePath) {
+  let stat;
   try {
-    const body = await fs.readFile(filePath);
-    res.writeHead(200, {
-      ...CORS,
-      'content-type': TYPES[path.extname(filePath)] || 'application/octet-stream',
-      // The app reloads constantly during development and stale JS is a
-      // uniquely confusing failure, so nothing is cached.
-      'cache-control': 'no-cache',
-    });
-    res.end(body);
-    return true;
+    stat = await fs.stat(filePath);
   } catch {
     return false;
   }
+  // A directory resolves and stats happily, then fails on read. Answering 404
+  // here keeps the caller's "did this path exist" question honest.
+  if (!stat.isFile()) return false;
+
+  res.writeHead(200, {
+    ...CORS,
+    'content-type': TYPES[path.extname(filePath)] || 'application/octet-stream',
+    'content-length': stat.size,
+    // The app reloads constantly during development and stale JS is a
+    // uniquely confusing failure, so nothing is cached.
+    'cache-control': 'no-cache',
+  });
+
+  try {
+    await pipeline(createReadStream(filePath), res);
+  } catch {
+    // A client that navigates away mid-download aborts the socket. Ordinary on
+    // a page that fetches twenty-one large files; not a server fault, and the
+    // headers have already gone out so there is nothing left to say.
+    res.destroy();
+  }
+  return true;
 }
 
 // Day-keyed directories the app would otherwise discover by asking for files
@@ -176,8 +208,12 @@ if (import.meta.url === `file://${process.argv[1]}`) {
       console.log('  live  disabled (GRIDSENSE_LIVE=0)');
       return;
     }
-    const { start, POLL_MS } = await import('./live.js');
+    const { start, POLL_MS, describeBudget } = await import('./live.js');
     console.log(`  live  polling every ${POLL_MS / 1000}s`);
+    // Printed where a deploy's logs will show it. A feed disabled by the memory
+    // budget is otherwise indistinguishable from a feed that is broken, and the
+    // next person to look will debug the wrong thing.
+    console.log(`  live  ${describeBudget()}`);
     start({
       onTick: (m) => {
         const parts = Object.entries(m.feeds).map(([name, f]) => (

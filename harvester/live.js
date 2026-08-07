@@ -70,26 +70,51 @@ export const POLL_MS = 60_000;
 //
 // A NEM interval file is about 135 KB, so this is roughly 60 MB against a data
 // directory that already holds several hundred.
-export const RETENTION_HOURS = 36;
+// Scaled to the budget as well, because live interval files are disk rather
+// than memory but a full disk is the other way this dies. A NEM interval file
+// is about 135 KB, so 36 hours is roughly 60 MB per feed and 12 hours is 20.
+export const RETENTION_HOURS = Number(process.env.GRIDSENSE_RETENTION_HOURS)
+  || (Number(process.env.GRIDSENSE_MEMORY_MB) >= 1024 ? 36 : 12);
 
 // How far a cold start reads back to meet the end of the backfill. Costs one
-// request per interval, so it is bounded rather than "however big the gap is".
-const BRIDGE_HOURS = 24;
+// request per interval and one file on disk, so it can never exceed what the
+// sweep is about to keep — bridging 24 hours into a 12-hour window writes half
+// the files only to delete them.
+const BRIDGE_HOURS = Math.min(24, RETENTION_HOURS);
 
 // Feeds laid down as one file per five-minute interval.
 export const FEEDS = ['nem', 'market', 'wem'];
 
 /**
- * Whether to poll Western Australia's five-minute dispatch solution.
+ * How much memory this instance actually has, in MB.
  *
- * On by default, because it is the only way WA is actually live and the only
- * source of its curtailment cap. Off is a supportable choice rather than a
- * degraded one: the daily catch-up still runs, so WA remains present and a
- * trading day fresh, just not to the interval. The cost being traded is real —
- * about 8.6 GB of downloads a day and a 30 MB parse every five minutes, which
- * on a 512 MB instance is worth being able to decline.
+ * Declared rather than detected: a container's real limit is not reliably
+ * visible from inside it, and `os.totalmem()` on a Render instance reports the
+ * host's memory, not the slice this process is allowed. Guessing high is the
+ * failure that took the service down — so the default is the smallest plan.
  */
-const WA_LIVE = process.env.GRIDSENSE_WA_LIVE !== '0';
+const MEMORY_MB = Number(process.env.GRIDSENSE_MEMORY_MB) || 512;
+
+/**
+ * Whether this instance can afford a feed that parses a large document.
+ *
+ * Two feeds here hold a whole file in memory at once, and neither can be
+ * streamed without a JSON/CSV parser this project does not have a dependency
+ * budget for. The WA dispatch solution is 30 MB of uncompressed JSON, which is
+ * a ~30 MB buffer, then a ~60 MB UTF-16 string, then an object graph several
+ * times that — a peak near 350 MB. Next_Day_Dispatch decompresses to 122 MB of
+ * CSV. On a 512 MB instance either one is fatal, and the symptom is not a
+ * handled error: the container is killed and every request 502s.
+ *
+ * So they are off below a gigabyte and on above it, and either can be forced
+ * in both directions by naming it explicitly.
+ */
+const HEAVY_PARSE_OK = MEMORY_MB >= 1024;
+const envFlag = (name, fallback) => (
+  process.env[name] === undefined ? fallback : process.env[name] !== '0'
+);
+
+const WA_LIVE = envFlag('GRIDSENSE_WA_LIVE', HEAVY_PARSE_OK);
 
 /**
  * Whether to pull completed NEM trading days from Next_Day_Dispatch.
@@ -101,12 +126,22 @@ const WA_LIVE = process.env.GRIDSENSE_WA_LIVE !== '0';
  * the cap, so once the day lands the whole day is rewritten at full fidelity
  * and the intervals become ordinary training data on the next load.
  *
- * The cost is a 122 MB CSV parsed once a day. `GRIDSENSE_NEXTDAY=0` declines
- * it on an instance too small to hold that, at the price of live NEM intervals
- * never becoming fittable until a redeploy runs the backfill.
+ * The cost is a 122 MB CSV parsed once a day, which does not fit on a small
+ * instance — so this follows the memory budget above rather than defaulting on.
+ * Declining it costs the settling: live NEM intervals stay provisional, and
+ * their day is rewritten at full fidelity by the next redeploy's backfill
+ * instead of within the hour.
  */
-const NEXTDAY = process.env.GRIDSENSE_NEXTDAY !== '0';
+const NEXTDAY = envFlag('GRIDSENSE_NEXTDAY', HEAVY_PARSE_OK);
 const NEXTDAY_CHECK_MS = HOUR_MS;
+
+/** One line at startup saying what this instance will and will not do. */
+export function describeBudget() {
+  const at = (on, name) => `${name} ${on ? 'on' : 'off'}`;
+  return `live: ${MEMORY_MB} MB budget — ${at(WA_LIVE, 'WA 5-minute')}, `
+    + `${at(NEXTDAY, 'next-day settle')}, keeping ${RETENTION_HOURS}h`
+    + (HEAVY_PARSE_OK ? '' : ' (raise GRIDSENSE_MEMORY_MB on a larger instance to enable both)');
+}
 
 /**
  * Write via a temporary file and rename.
@@ -569,7 +604,8 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   if (once) {
     report(await tick(registry));
   } else {
-    console.log(`live: polling every ${POLL_MS / 1000}s, keeping ${RETENTION_HOURS}h`);
+      console.log(`live: polling every ${POLL_MS / 1000}s, keeping ${RETENTION_HOURS}h`);
+    console.log(describeBudget());
     start({ registry, onTick: report });
     // Nothing else holds this process open, and the timers are unref'd.
     setInterval(() => {}, 1 << 30);

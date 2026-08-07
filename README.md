@@ -110,10 +110,20 @@ at the repo and it will pick it up, or create the service by hand.
 | Service type | Web Service |
 | Runtime | Node |
 | Build command | `npm install && npm run build:data` |
-| Start command | `node harvester/serve.js` |
+| Start command | `node --max-old-space-size=384 harvester/serve.js` |
 | Health check path | `/` |
 | Instance | Starter is enough — see memory note |
 | Environment variable | `NODE_OPTIONS` = `--max-old-space-size=1536` |
+| Environment variable | `GRIDSENSE_MEMORY_MB` = `512` (or your plan's real memory) |
+
+**The heap cap belongs on the start command, and this matters.** `NODE_OPTIONS`
+is a *service* variable, so the 1536 MB the build needs is also handed to the
+running server. On a 512 MB instance V8 then believes it has three times the
+memory that exists, never collects under pressure, and grows until the
+container kills it — every request 502s, and nothing in the application log
+says why, because the process did not fail, it was killed. A flag on the
+command line takes precedence over `NODE_OPTIONS`, so the build keeps its
+headroom and the server is held to what the instance actually has.
 
 The build command deliberately names no pipeline steps. A service created by
 hand keeps the build command it was given and never re-reads `render.yaml`, so

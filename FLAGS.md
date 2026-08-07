@@ -834,3 +834,44 @@ Left open rather than patched with a guessed multiplier. A widening factor
 chosen to make coverage look right would be indistinguishable from one chosen
 because it was correct, and the whole point of the conformal layer is that its
 width is earned.
+
+## F23 — the build's heap limit was also the server's, and it was three times the box
+
+The deployed service returned 502 on every request. The cause was not one bug
+but a limit set for the wrong process, plus two things I had just added that
+were only survivable under the wrong limit's assumptions.
+
+`NODE_OPTIONS=--max-old-space-size=1536` is documented here as a Render *service*
+variable, because the build needs that headroom to parse a 122 MB dispatch CSV.
+Render applies service variables to the running instance as well. So on a 512 MB
+plan V8 believed it had three times the memory that existed, never collected
+under pressure, and grew until the container killed the process. Nothing in the
+application log says why, because the process did not fail — it was killed, and
+the log simply stops.
+
+Three separate paths could then exhaust it, and all three are fixed:
+
+  The server read whole files into Buffers. A dispatch day is 30 MB and the app
+  asks for twenty-one on a cold load, so a few simultaneous visitors held
+  hundreds of megabytes at once. Buffers live outside V8's heap, so the heap cap
+  never bounded them — only the container did. Now streamed, one chunk at a time
+  regardless of file size or concurrency.
+
+  The WA five-minute solution feed parses a 30 MB JSON document, peaking near
+  350 MB. The next-day settle parses 122 MB of CSV. Both were defaulted on.
+
+  Neither could be streamed without a parser this project has no dependency
+  budget for, so they are now gated on a declared `GRIDSENSE_MEMORY_MB` and are
+  off below 1024. The startup log states which are on and how to enable them,
+  because a feed silently disabled by a budget is the next thing to be
+  mistaken for a bug.
+
+The heap cap now lives on the start command, where a CLI flag takes precedence
+over `NODE_OPTIONS`: the build keeps its headroom and the server is held to what
+the instance actually has.
+
+What made this expensive to see: every symptom was an absence. No stack trace,
+no error, a log that ends mid-sentence, and a 502 from the proxy rather than the
+application. The general lesson is that a memory limit intended for one phase of
+a deploy will be inherited by every other phase unless it is scoped, and that a
+Buffer is not covered by the flag most people reach for.

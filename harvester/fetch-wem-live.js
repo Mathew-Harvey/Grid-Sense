@@ -29,6 +29,29 @@ import { wemQuantityToMw } from './wem-registry.js';
 
 const DIR = 'https://data.wa.aemo.com.au/public/market-data/wemde/dispatchSolution/dispatchData/current/';
 
+/**
+ * Refuse a file bigger than this rather than parse it.
+ *
+ * Measured at ~30 MB in August 2026. A JSON document this size costs several
+ * times its own length in peak heap, and if AEMO ever adds a constraint set or
+ * a scenario the growth lands as an out-of-memory kill on the instance — the
+ * whole service 502ing because one optional feed got fatter. A skipped poll is
+ * a WA interval missing from the map. That is the right trade, and it is only
+ * the right trade if the ceiling exists.
+ */
+const MAX_BYTES = Number(process.env.GRIDSENSE_WA_MAX_MB || 48) * 1024 * 1024;
+
+/** Content-Length, or null when the server does not offer one. */
+async function sizeOf(url) {
+  try {
+    const res = await fetch(url, { method: 'HEAD', signal: AbortSignal.timeout(30_000) });
+    const len = Number(res.headers.get('content-length'));
+    return Number.isFinite(len) && len > 0 ? len : null;
+  } catch {
+    return null;
+  }
+}
+
 /** Live dispatch solutions currently published, oldest last. */
 export async function listSolutions() {
   return listNemwebDir(DIR, /ReferenceDispatchSolution_\d{12}\.json/gi);
@@ -121,12 +144,30 @@ export async function pollSolutions(maps, since = null) {
   if (!fresh.length) return { latest: since, intervals: [] };
 
   const intervals = [];
+  const skipped = [];
   for (const name of fresh) {
-    const body = JSON.parse(new TextDecoder().decode(await fetchBuffer(DIR + name)));
+    const bytes = await sizeOf(DIR + name);
+    if (bytes !== null && bytes > MAX_BYTES) {
+      // Deliberately still advances past it. Retrying a file that is too big
+      // would stall the feed on the same file every minute for ever.
+      skipped.push({ name, bytes });
+      continue;
+    }
+    let body;
+    try {
+      body = JSON.parse(new TextDecoder().decode(await fetchBuffer(DIR + name)));
+    } catch (err) {
+      skipped.push({ name, error: String(err.message) });
+      continue;
+    }
     const folded = foldSolution(body, maps);
     if (folded) intervals.push({ ...folded, source: name });
   }
-  return { latest: fresh.at(-1), intervals };
+  for (const s of skipped) {
+    console.warn(`wem-live: skipped ${s.name}` +
+      (s.bytes ? ` — ${(s.bytes / 1048576).toFixed(0)} MB is over the ${(MAX_BYTES / 1048576).toFixed(0)} MB ceiling` : ` — ${s.error}`));
+  }
+  return { latest: fresh.at(-1), intervals, skipped: skipped.length };
 }
 
 // Re-exported so a caller converting facilityScada quantities and a caller
