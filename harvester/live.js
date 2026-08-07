@@ -28,7 +28,9 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { pollScada } from './fetch-nem.js';
-import { catchUpFromCurrent } from './backfill-wem.js';
+import { backfill } from './backfill.js';
+import { catchUpFromCurrent, stationMaps } from './backfill-wem.js';
+import { pollSolutions } from './fetch-wem-live.js';
 import { refreshForecast } from './backfill-weather.js';
 import { parsePriceTable, listDispatchIsFiles } from './fetch-price.js';
 import { foldDay } from './backfill-flows.js';
@@ -43,8 +45,11 @@ const DISPATCHIS_DIR = 'https://nemweb.com.au/Reports/Current/DispatchIS_Reports
 const HOUR_MS = 3_600_000;
 const DAY_MS = 24 * HOUR_MS;
 
-// Western Australia is not a five-minute feed and cannot be polled like one, so
-// it is checked hourly rather than every minute. See FLAGS F18.
+// How often the daily Western Australian archive catch-up runs. This is the
+// facilityScada trading-day file, which appears once a day; the five-minute
+// solution feed below is what makes WA actually live. Hourly is enough to
+// notice a completed day soon after it lands without asking 1,440 times for
+// something that changes once.
 const WEM_CHECK_MS = HOUR_MS;
 
 // Forward weather costs about 113 of Open-Meteo's 10,000 daily calls per
@@ -71,10 +76,37 @@ export const RETENTION_HOURS = 36;
 // request per interval, so it is bounded rather than "however big the gap is".
 const BRIDGE_HOURS = 24;
 
-// Feeds that publish every five minutes and are laid down as interval files.
-// Western Australia is tracked in the manifest too, but it is a daily ingest
-// into the backfill directory rather than a live interval stream.
-export const FEEDS = ['nem', 'market'];
+// Feeds laid down as one file per five-minute interval.
+export const FEEDS = ['nem', 'market', 'wem'];
+
+/**
+ * Whether to poll Western Australia's five-minute dispatch solution.
+ *
+ * On by default, because it is the only way WA is actually live and the only
+ * source of its curtailment cap. Off is a supportable choice rather than a
+ * degraded one: the daily catch-up still runs, so WA remains present and a
+ * trading day fresh, just not to the interval. The cost being traded is real —
+ * about 8.6 GB of downloads a day and a 30 MB parse every five minutes, which
+ * on a 512 MB instance is worth being able to decline.
+ */
+const WA_LIVE = process.env.GRIDSENSE_WA_LIVE !== '0';
+
+/**
+ * Whether to pull completed NEM trading days from Next_Day_Dispatch.
+ *
+ * This is what settles the provisional live intervals. The 5-minute SCADA feed
+ * carries output and no semi-dispatch cap, so a live NEM interval is scored but
+ * never fitted on — and without this it would stay that way for good, because
+ * nothing else ever revisits it. Next_Day_Dispatch carries the availability and
+ * the cap, so once the day lands the whole day is rewritten at full fidelity
+ * and the intervals become ordinary training data on the next load.
+ *
+ * The cost is a 122 MB CSV parsed once a day. `GRIDSENSE_NEXTDAY=0` declines
+ * it on an instance too small to hold that, at the price of live NEM intervals
+ * never becoming fittable until a redeploy runs the backfill.
+ */
+const NEXTDAY = process.env.GRIDSENSE_NEXTDAY !== '0';
+const NEXTDAY_CHECK_MS = HOUR_MS;
 
 /**
  * Write via a temporary file and rename.
@@ -203,8 +235,45 @@ async function pollNem(registry, since) {
  * Checked hourly. A minute-by-minute poll of a once-a-day file is 1,440
  * requests to learn something that changes once.
  */
+/**
+ * Western Australia to the interval, from the dispatch engine's own solution.
+ *
+ * Unlike every other feed here this one carries a curtailment mask —
+ * `dispatchCaps` names the facilities the engine is holding down — so a live WA
+ * interval is admitted to fitting where a live NEM interval is not. WA's
+ * position is the reverse of what it was: its history has no mask and its
+ * present does.
+ */
+async function pollWemLive(maps, since) {
+  const { latest, intervals } = await pollSolutions(maps, since ?? null);
+  for (const cell of intervals) {
+    await writeInterval('wem', cell.at, {
+      at: cell.at,
+      source: cell.source,
+      settlement_ms: cell.settlement_ms,
+      observations: cell.observations,
+    });
+  }
+  return { since: latest, written: intervals.length };
+}
+
+/**
+ * Pull any completed NEM trading day the disk lacks.
+ *
+ * `backfill` already skips days already written and reads from
+ * Next_Day_Dispatch, so this is a bounded look at the last few days rather than
+ * a second implementation of the same fetch. Three days, so a weekend outage
+ * still catches up.
+ */
+async function pollNextDay(state, now) {
+  const due = state.nextday?.checked_at == null || now - state.nextday.checked_at >= NEXTDAY_CHECK_MS;
+  if (!due) return { skipped: true };
+  const r = await backfill({ days: 3 });
+  return { fetched: r.fetched, checked_at: now };
+}
+
 async function pollWemDaily(state, now) {
-  const due = state.wem?.checked_at == null || now - state.wem.checked_at >= WEM_CHECK_MS;
+  const due = state.wem_daily?.checked_at == null || now - state.wem_daily.checked_at >= WEM_CHECK_MS;
   if (!due) return { skipped: true };
   const { offered, ingested } = await catchUpFromCurrent();
   return { offered, ingested, checked_at: now };
@@ -254,6 +323,34 @@ async function pollMarket(since) {
   return { since: fresh.at(-1), written };
 }
 
+/**
+ * The manifest as the disk currently stands.
+ *
+ * Written before the first tick as well as after every one, because a tick can
+ * take minutes — the cold-start bridge fetches up to 288 files — and until the
+ * manifest exists every client asking for it gets a 404. An empty manifest is a
+ * true statement the client can act on; a 404 is one it has to guess about.
+ */
+async function manifestFromDisk(now, retentionHours, feeds = {}) {
+  const manifest = {
+    generated_at: now,
+    poll_ms: POLL_MS,
+    retention_hours: retentionHours,
+    feeds: {},
+  };
+  for (const feed of FEEDS) {
+    const intervals = await intervalsOnDisk(feed);
+    manifest.feeds[feed] = {
+      written: 0, last_ok: null, error: null,
+      ...feeds[feed],
+      cadence: 'interval',
+      latest_at: intervals.at(-1) ?? null,
+      intervals,
+    };
+  }
+  return manifest;
+}
+
 /** Drop interval files past the retention horizon. */
 export async function sweep(now = Date.now(), retentionHours = RETENTION_HOURS) {
   const cutoff = now - retentionHours * HOUR_MS;
@@ -293,9 +390,19 @@ export async function tick(registry, { now = Date.now(), retentionHours = RETENT
   const bridging = state.nem?.since == null;
   if (bridging) console.log(`live: cold start, bridging Dispatch_SCADA from ${nemSince}`);
 
+  // Built once and shared: the facility-to-station join is read from the
+  // registry, and doing it per interval would re-read the file every minute.
+  let waMaps = null;
+  if (WA_LIVE) {
+    try { waMaps = await stationMaps(); } catch { /* reported by the feed below */ }
+  }
+
   const pollers = {
     nem: () => pollNem(registry, nemSince),
     market: () => pollMarket(state.market?.since),
+    wem: () => (waMaps
+      ? pollWemLive(waMaps, state.wem?.since)
+      : { since: state.wem?.since ?? null, written: 0 }),
   };
 
   const feeds = {};
@@ -315,27 +422,42 @@ export async function tick(registry, { now = Date.now(), retentionHours = RETENT
 
   // Western Australia, on its own cadence and reported in its own terms — a
   // trading day, not an interval. Its failures are isolated like the others.
-  const prevWem = state.wem ?? {};
-  let wem;
+  const prevWem = state.wem_daily ?? {};
+  let wemDaily;
   try {
     const r = await pollWemDaily(state, now);
-    state.wem = r.skipped ? prevWem : { checked_at: r.checked_at, last_day: r.offered?.at(-1) ?? prevWem.last_day ?? null };
-    wem = {
-      cadence: 'daily',
-      checked_at: state.wem.checked_at ?? null,
-      last_day: state.wem.last_day ?? null,
+    state.wem_daily = r.skipped
+      ? prevWem
+      : { checked_at: r.checked_at, last_day: r.offered?.at(-1) ?? prevWem.last_day ?? null };
+    wemDaily = {
+      daily_checked_at: state.wem_daily.checked_at ?? null,
+      last_day: state.wem_daily.last_day ?? null,
       ingested: r.skipped ? [] : r.ingested.map((d) => d.iso),
-      error: null,
+      daily_error: null,
     };
   } catch (err) {
-    state.wem = prevWem;
-    wem = {
-      cadence: 'daily',
-      checked_at: prevWem.checked_at ?? null,
+    state.wem_daily = prevWem;
+    wemDaily = {
+      daily_checked_at: prevWem.checked_at ?? null,
       last_day: prevWem.last_day ?? null,
       ingested: [],
-      error: String(err.message),
+      daily_error: String(err.message),
     };
+  }
+
+  // Completed NEM days, on the same slow cadence. Isolated like the rest: a
+  // failure here costs the settling of provisional intervals and nothing else.
+  const prevNextDay = state.nextday ?? {};
+  let nextday = { cadence: 'daily', ...prevNextDay, enabled: NEXTDAY, error: null };
+  if (NEXTDAY) {
+    try {
+      const r = await pollNextDay(state, now);
+      if (!r.skipped) state.nextday = { checked_at: r.checked_at, fetched: r.fetched };
+      nextday = { cadence: 'daily', ...state.nextday, enabled: true, error: null };
+    } catch (err) {
+      state.nextday = prevNextDay;
+      nextday = { cadence: 'daily', ...prevNextDay, enabled: true, error: String(err.message) };
+    }
   }
 
   // Forward weather, on its own slow cadence. Without it the live dispatch
@@ -360,18 +482,14 @@ export async function tick(registry, { now = Date.now(), retentionHours = RETENT
   await sweep(now, retentionHours);
   await writeState(state);
 
-  const manifest = {
-    generated_at: now,
-    poll_ms: POLL_MS,
-    retention_hours: retentionHours,
-    feeds: {},
-  };
-  for (const feed of FEEDS) {
-    const intervals = await intervalsOnDisk(feed);
-    manifest.feeds[feed] = { ...feeds[feed], cadence: 'interval', latest_at: intervals.at(-1) ?? null, intervals };
-  }
-  manifest.feeds.wem = wem;
+  const manifest = await manifestFromDisk(now, retentionHours, feeds);
+  // Both halves of Western Australia in one entry: the five-minute solution
+  // feed and the daily archive catch-up behind it. `live` says which the
+  // interface should describe, so a reader is never told WA is current because
+  // yesterday's file arrived.
+  manifest.feeds.wem = { ...manifest.feeds.wem, ...wemDaily, live: WA_LIVE };
   manifest.feeds.weather = weather;
+  manifest.feeds.nextday = nextday;
 
   // Last, so nothing it names is missing from disk.
   await writeAtomic(path.join(LIVE_DIR, 'index.json'), JSON.stringify(manifest));
@@ -390,9 +508,24 @@ export function start({ intervalMs = POLL_MS, registry = null, onTick = null } =
   let timer = null;
   let stopped = false;
 
+  // Publish what is already on disk before the first tick runs. A cold start's
+  // bridge takes minutes, and a client that arrives during it should be told
+  // "nothing yet" rather than left to interpret a 404 as a broken deploy.
+  const seed = (async () => {
+    try {
+      await fs.mkdir(LIVE_DIR, { recursive: true });
+      const m = await manifestFromDisk(Date.now(), RETENTION_HOURS);
+      m.starting = true;
+      await writeAtomic(path.join(LIVE_DIR, 'index.json'), JSON.stringify(m));
+    } catch (err) {
+      console.error(`live: could not write the initial manifest: ${err.message}`);
+    }
+  })();
+
   const loop = async () => {
     timer = null;
     if (stopped) return;
+    await seed;
     try {
       const reg = registry ?? JSON.parse(await fs.readFile(REGISTRY, 'utf8'));
       const manifest = await tick(reg);
@@ -428,8 +561,8 @@ if (import.meta.url === `file://${process.argv[1]}`) {
       return `${f}: +${feed.written} (${age})${feed.error ? ` ERROR ${feed.error}` : ''}`;
     });
     const wem = m.feeds.wem;
-    parts.push(`wem: ${wem.last_day ?? 'nothing'} daily${wem.ingested.length ? ` (+${wem.ingested.join(',')})` : ''}` +
-      `${wem.error ? ` ERROR ${wem.error}` : ''}`);
+    parts.push(`wem-daily: ${wem.last_day ?? 'nothing'}${wem.ingested.length ? ` (+${wem.ingested.join(',')})` : ''}` +
+      `${wem.daily_error ? ` ERROR ${wem.daily_error}` : ''}`);
     console.log(`${new Date(m.generated_at).toISOString()}  ${parts.join('  ')}`);
   };
 

@@ -106,13 +106,16 @@ test('a file swept between manifest and fetch is skipped, not fatal', async () =
   assert.equal(statuses.at(-1).ok, true, 'a swept file is expected, not a feed failure');
 });
 
-test('an unreachable manifest is reported rather than thrown', async () => {
-  stubFetch({});
+test('a server that cannot be reached is reported rather than thrown', async () => {
+  // A transport failure, not a 404: the connection itself did not happen. That
+  // is the case "unreachable" is the honest word for.
+  globalThis.fetch = async () => { throw new Error('network down'); };
   const statuses = [];
   const feed = createLiveFeed({ base: '/data', onIntervals: () => {}, onStatus: (s) => statuses.push(s) });
   await feed.ready;
   feed.stop();
   assert.equal(statuses.at(-1).ok, false);
+  assert.notEqual(statuses.at(-1).absent, true);
   assert.match(describeLive(statuses.at(-1)), /unreachable/);
 });
 
@@ -189,4 +192,94 @@ test('a variable present in only one source survives the join', () => {
   const merged = mergeWeatherSources(archive, forecast);
   assert.deepEqual(Object.keys(merged.variables).sort(), ['ghi', 'wind']);
   assert.deepEqual(merged.variables.ghi.values, [800]);
+});
+
+// --- Western Australia's live dispatch solution ----------------------------
+
+const { foldSolution, bindingRun } = await import('../harvester/fetch-wem-live.js');
+
+const maps = {
+  facilityToStation: new Map([['ALPHA_WF1', 'ALPHA'], ['ALPHA_WF2', 'ALPHA'], ['BETA_PV1', 'BETA']]),
+  capacityOf: new Map([['ALPHA', 100], ['BETA', 40]]),
+};
+
+const solution = (interval, details, caps = []) => ({
+  data: {
+    primaryDispatchInterval: interval,
+    solutionData: [
+      { dispatchInterval: interval, facilityScheduleDetails: details, dispatchCaps: caps },
+      // A forward projection the engine solved alongside it. Not a measurement.
+      { dispatchInterval: '2026-08-07T18:40:00+08:00', facilityScheduleDetails: [{ facilityCode: 'ALPHA_WF1', initialMw: 999 }] },
+    ],
+  },
+});
+
+test('only the binding interval is read, never the forward projections', () => {
+  const body = solution('2026-08-07T18:35:00+08:00', [{ facilityCode: 'ALPHA_WF1', initialMw: 10 }]);
+  assert.equal(bindingRun(body).dispatchInterval, '2026-08-07T18:35:00+08:00');
+  const r = foldSolution(body, maps);
+  // 999 is the engine's forecast for an interval that has not happened. Storing
+  // it would score the model against AEMO's projection rather than the grid.
+  assert.equal(r.observations.find((o) => o.station_id === 'ALPHA').output_mw, 10);
+});
+
+test('a station is the sum of its facilities, and unknown facilities are dropped', () => {
+  const body = solution('2026-08-07T18:35:00+08:00', [
+    { facilityCode: 'ALPHA_WF1', initialMw: 10 },
+    { facilityCode: 'ALPHA_WF2', initialMw: 15.5 },
+    { facilityCode: 'NOT_IN_REGISTRY', initialMw: 900 },
+  ]);
+  const r = foldSolution(body, maps);
+  assert.equal(r.observations.length, 1);
+  assert.equal(r.observations[0].output_mw, 25.5);
+  assert.equal(r.observations[0].units_online, 2);
+});
+
+test('a dispatch cap marks the station curtailed, and its absence marks it not', () => {
+  const body = solution('2026-08-07T18:35:00+08:00', [
+    { facilityCode: 'ALPHA_WF1', initialMw: 10 },
+    { facilityCode: 'BETA_PV1', initialMw: 5 },
+  ], [{ facilityCode: 'BETA_PV1', dispatchCap: 5 }]);
+  const r = foldSolution(body, maps);
+  const by = new Map(r.observations.map((o) => [o.station_id, o]));
+
+  // The distinction the whole WA curtailment story turns on: false is a
+  // measurement that the station was not held back, and must never be produced
+  // by a feed that simply does not say. This feed does say.
+  assert.equal(by.get('ALPHA').capped, false);
+  assert.equal(by.get('BETA').capped, true);
+});
+
+test('initialMw is aligned as interval-start, like the NEM field it mirrors', () => {
+  const body = solution('2026-08-07T18:35:00+08:00', [{ facilityCode: 'ALPHA_WF1', initialMw: 10 }]);
+  const r = foldSolution(body, maps);
+  // 18:35 AWST is 10:35 UTC; initialMw describes the interval's start, so the
+  // observation belongs at 10:30 UTC. Getting this wrong runs WA one interval
+  // late against every weather feature it is compared with.
+  assert.equal(new Date(r.at).toISOString(), '2026-08-07T10:30:00.000Z');
+  assert.equal(r.settlement_ms, Date.parse('2026-08-07T10:35:00.000Z'));
+});
+
+test('a solution with no runs is null rather than a throw', () => {
+  assert.equal(bindingRun({ data: { solutionData: [] } }), null);
+  assert.equal(foldSolution({ data: { solutionData: [] } }, maps), null);
+});
+
+test('a manifest that is not there yet is reported as absent, not as a failure', async () => {
+  stubFetch({});
+  const statuses = [];
+  const feed = createLiveFeed({ base: '/data', onIntervals: () => {}, onStatus: (s) => statuses.push(s) });
+  await feed.ready;
+  feed.stop();
+  assert.equal(statuses.at(-1).absent, true);
+  // "Unreachable" claims the server was asked and could not answer. A 404 on a
+  // deploy without live ingest means there is nothing to reach, which is a
+  // different thing to tell someone.
+  assert.doesNotMatch(describeLive(statuses.at(-1)), /unreachable/);
+  assert.match(describeLive(statuses.at(-1)), /No live feed on this server/);
+});
+
+test('a harvester still catching up says so rather than reporting a stale interval', () => {
+  const status = { ok: true, manifest: { starting: true, feeds: { nem: { latest_at: 1 } } } };
+  assert.match(describeLive(status, 2_000_000_000_000), /catching up/);
 });

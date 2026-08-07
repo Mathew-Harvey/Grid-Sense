@@ -26,7 +26,7 @@ forecasts see turbine-level telemetry this system does not.
 harvester/   Node data layer: fetch, parse, normalise, reconcile, backfill, serve
 app/         the dashboard: plain JS + uPlot, no framework, no build step
 data/        harvester output (gitignored, rebuilt by the backfill commands)
-test/        node:test suites — 185 tests
+test/        node:test suites — 210 tests
 tools/       screenshot harness for the visual iteration loop
 ```
 
@@ -137,8 +137,10 @@ Three things worth knowing before the first deploy:
   builds on their own infrastructure rather than the instance you pay for, so
   this is not a reason to size up: a Starter instance (0.5 CPU, 512 MB) built
   the full 21-day pipeline and serves it. The running server only reads one
-  file per request, so it is undemanding; the build is the expensive half and
-  it does not run on the instance.
+  file per request, so serving is undemanding. Live ingest is not free, though,
+  and it does run on the instance: the WA solution feed parses 30 MB every five
+  minutes and the next-day settle parses 122 MB once a day. Both have their own
+  switch below if a Starter instance turns out to be too small for them.
 - **Ephemeral disk.** Render rebuilds `data/` on every deploy — that is by
   design here (fresh data each deploy, ~650 MB for 21 days). The build takes
   roughly 15 minutes, most of it fetching from NEMWeb.
@@ -159,66 +161,37 @@ it off.
 |---|---|---|
 | NEM dispatch | every 5 min | station output, from `Dispatch_SCADA` |
 | Market | every 5 min | regional prices, regional demand, interconnector flow, from one `DispatchIS` file |
+| WA dispatch | every 5 min | station output **and the curtailment cap**, from the WEM's `ReferenceDispatchSolution` |
 | Forward weather | every 3 hours | Open-Meteo forecast, 3 days ahead, ~113 of 10,000 daily calls |
-| Western Australia | daily | a completed WEM trading day — see below |
+| Completed NEM days | hourly check | `Next_Day_Dispatch`, which settles provisional intervals |
+| Completed WA days | hourly check | the `facilityScada` trading-day file |
 
 Live intervals land as one small file each under `data/live/`, listed by a
 manifest that is written **after** them so it can never name a file that is not
 there. The browser polls the manifest each minute and fetches only what it
-lacks. Files older than six hours are swept: the backfill owns history, and the
-live window only has to be wide enough for a backgrounded tab to catch up.
+lacks. Files older than 36 hours are swept.
 
-Two honest limits, both surfaced in the interface rather than left to be
-inferred:
+Two settings exist because two feeds cost real money to run:
 
-- **Live intervals are scored but not fitted on.** The 5-minute SCADA feed
-  carries output and no semi-dispatch cap — that arrives next day — so a live
-  interval's curtailment is unknown, and an unknown mask must never read as
-  "not curtailed". Live readings therefore drive the display, the scoring and
-  the persistence chain, and are kept out of expert fitting until the next-day
-  file replaces the day with the real availability and the real cap.
-- **Western Australia is daily, not live.** Measured on 7 August 2026 at 17:53
-  AWST, ten hours into the open trading day: `facilityScada/current/` held the
-  day that closed at 07:55 that morning, and the archive was another day
-  behind. There is no intra-day WA feed to poll (FLAGS F18), so the poller
-  takes each completed trading day as soon as it appears — which is still a day
-  fresher than the archive the backfill reads. The map's SWIS floor stays at its
-  last known value while the NEM regions move.
-
-### The static site (optional)
-
-The app itself is ~1 MB of hand-written JS and CSS, so it can be served as a
-Render Static Site with the web service as its data plane. This buys CDN
-delivery for the app shell; the data still comes from the web service, which
-sends `Access-Control-Allow-Origin: *` on every route for exactly this
-arrangement. It is a nicety, not a requirement — the web service alone serves
-everything.
-
-| Setting | Value |
+| Variable | Effect |
 |---|---|
-| Service type | Static Site |
-| Build command | `npm install && mkdir -p app/vendor/uplot/dist && cp node_modules/uplot/dist/uPlot.esm.js node_modules/uplot/dist/uPlot.min.css app/vendor/uplot/dist/` |
-| Publish directory | `app` |
+| `GRIDSENSE_LIVE=0` | no live ingest at all |
+| `GRIDSENSE_WA_LIVE=0` | WA falls back to the daily file. Saves ~8.6 GB/day of downloads and a 30 MB parse every 5 min |
+| `GRIDSENSE_NEXTDAY=0` | no next-day settling. Saves a 122 MB CSV parse once a day, at the cost below |
 
-Then tell the app where the harvester lives: in `app/index.html`, uncomment
-the one line in the head and set it to the web service's URL —
+**Provisional intervals.** The NEM's 5-minute feed carries output and no
+semi-dispatch cap — that arrives next day — so a live NEM interval's curtailment
+is unknown, and an unknown mask must never read as "not curtailed". Live NEM
+readings therefore drive the display, the scoring and the persistence chain, and
+are withheld from expert fitting until `Next_Day_Dispatch` rewrites the day with
+the real availability and the real cap. With `GRIDSENSE_NEXTDAY=0` they stay
+provisional until a redeploy runs the backfill.
 
-```html
-window.GRIDSENSE_API_BASE = 'https://<your-web-service>.onrender.com';
-```
-
-The build command exists because the page loads uPlot from `/vendor/`, which
-the web service maps to `node_modules` but a static publish must carry as
-files.
-
-### The Postgres database (skip it)
-
-Nothing in GridSense connects to a database. The data layer is flat JSON files
-on the server's disk, rebuilt each deploy, plus IndexedDB inside the browser —
-there is no `DATABASE_URL` to set, and a provisioned Postgres instance would
-sit idle at full price. If a need appears later (say, keeping harvested
-history across deploys instead of re-fetching it), that is a design change to
-the harvester, not a configuration step.
+Western Australia is the exception, and the reverse of what you would expect:
+its dispatch solution publishes `dispatchCaps`, so a live WA interval carries a
+**measured** curtailment mask and is fitted on like any backfilled one. WA's
+history has no mask; its present does. See FLAGS F18, which recorded the
+opposite and was wrong.
 
 ## The numbers behind it
 

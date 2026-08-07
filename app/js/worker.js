@@ -865,8 +865,21 @@ function ingestLive(state, observations) {
     track.target[i] = o.output_mw;
     track.output[i] = o.output_mw;
     track.curtailed[i] = 0;
-    track.usable[i] = o.quality === 'suspect' ? 0 : 1;
-    track.provisional[i] = 1;
+
+    // Three states, not two, and the difference is which feed it came from.
+    //
+    //   capped true  — measured and held down. Excluded from the fleet total
+    //                  for the same reason a curtailed backfill interval is.
+    //   capped false — measured and known not to be held down. Western
+    //                  Australia's dispatch solution publishes the caps, so a
+    //                  live WA interval is as fittable as a backfilled one.
+    //   capped null  — unknown, which is every live NEM interval: the 5-minute
+    //                  SCADA feed carries no semi-dispatch cap. Scored and fed
+    //                  to persistence, withheld from fitting until the
+    //                  next-day file settles it.
+    const suspect = o.quality === 'suspect';
+    track.usable[i] = suspect || o.capped === true ? 0 : 1;
+    track.provisional[i] = o.capped === false ? 0 : 1;
     added++;
   }
   return { added, steps: state.steps, latest };

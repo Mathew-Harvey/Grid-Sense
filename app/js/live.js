@@ -13,7 +13,7 @@
 const MINUTE = 60_000;
 
 /** Feeds that arrive as one file per five-minute interval. */
-const INTERVAL_FEEDS = ['nem', 'market'];
+const INTERVAL_FEEDS = ['nem', 'market', 'wem'];
 
 /**
  * Watch the live manifest and emit new intervals.
@@ -36,7 +36,11 @@ export function createLiveFeed({ base, onIntervals, onStatus = null, pollMs = MI
 
   const fetchJson = async (url) => {
     const res = await fetch(url, { cache: 'no-store' });
-    if (!res.ok) throw new Error(`HTTP ${res.status} ${url}`);
+    if (!res.ok) {
+      const err = new Error(`HTTP ${res.status} ${url}`);
+      err.status = res.status;
+      throw err;
+    }
     return res.json();
   };
 
@@ -73,8 +77,8 @@ export function createLiveFeed({ base, onIntervals, onStatus = null, pollMs = MI
           }
           already.add(at);
           latest = Math.max(latest, at);
-          if (feed === 'nem') observations.push(...(cell.observations ?? []));
-          else market.push(cell);
+          if (feed === 'market') market.push(cell);
+          else observations.push(...(cell.observations ?? []));
         }
 
         // Forget what the harvester has already swept, so the set cannot grow
@@ -86,7 +90,16 @@ export function createLiveFeed({ base, onIntervals, onStatus = null, pollMs = MI
       if (observations.length || market.length) onIntervals({ observations, market, latest });
       onStatus?.({ ok: true, manifest, added: observations.length, at: Date.now() });
     } catch (err) {
-      onStatus?.({ ok: false, error: String(err.message), at: Date.now() });
+      // A missing manifest is not a broken feed. The harvester writes one as
+      // soon as it starts, but a deploy without live ingest, or an instance
+      // still coming up, has none — and telling the reader the feed is
+      // unreachable would be a stronger claim than the evidence supports.
+      onStatus?.({
+        ok: false,
+        absent: err.status === 404,
+        error: String(err.message),
+        at: Date.now(),
+      });
     } finally {
       inFlight = false;
     }
@@ -121,7 +134,10 @@ export function createLiveFeed({ base, onIntervals, onStatus = null, pollMs = MI
  */
 export function describeLive(status, now = Date.now()) {
   if (!status) return 'Live feed starting.';
+  if (status.absent) return 'No live feed on this server — the window ends at the last day the harvester built.';
   if (!status.ok) return `Live feed unreachable: ${status.error}`;
+
+  if (status.manifest?.starting) return 'Live feed starting — the harvester is catching up to now.';
 
   const nem = status.manifest?.feeds?.nem;
   if (!nem?.latest_at) return 'Live feed connected, no dispatch published yet.';
