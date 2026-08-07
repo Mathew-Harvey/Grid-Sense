@@ -8,7 +8,7 @@ that confidence justified?**
 It ingests AEMO's 5-minute dispatch feeds and Open-Meteo weather, fits physical
 power curves per station, trains an ensemble of six hand-written forecasting
 experts under a no-regret combiner, calibrates its uncertainty bands with
-adaptive conformal inference, and replays 90 days of history so you can watch
+adaptive conformal inference, and replays 21 days of history so you can watch
 the model go from useless to competent in front of you. Prices, revenue and
 curtailment cost sit on top of the physical forecasts, on the same time axis.
 
@@ -26,7 +26,7 @@ forecasts see turbine-level telemetry this system does not.
 harvester/   Node data layer: fetch, parse, normalise, reconcile, backfill, serve
 app/         the dashboard: plain JS + uPlot, no framework, no build step
 data/        harvester output (gitignored, rebuilt by the backfill commands)
-test/        node:test suites — 179 tests
+test/        node:test suites — 183 tests
 tools/       screenshot harness for the visual iteration loop
 ```
 
