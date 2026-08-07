@@ -30,6 +30,12 @@ test/        node:test suites — 179 tests
 tools/       screenshot harness for the visual iteration loop
 ```
 
+A fourth tab, **How this works**, explains the whole system from nothing for a
+reader with no background — why the grid must balance instantly, why wind is
+forecastable and coal is not, what curtailment is, why "nothing will change" is
+the forecast to beat, what an uncertainty range promises, and why six simple
+forecasters beat one clever one — each with a small animation of the idea.
+
 The dashboard opens in **Plain English** mode: every panel is retitled and
 captioned for a reader who has never thought about electricity markets, domain
 terms explain themselves on tap, a story line says what is happening in one

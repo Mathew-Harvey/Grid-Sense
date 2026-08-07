@@ -13,8 +13,9 @@ import { initExplain, updateStory } from './explain.js';
 import * as aggregateView from './views/aggregate.js';
 import * as stationView from './views/station.js';
 import * as trainingView from './views/training.js';
+import * as learnView from './views/learn.js';
 
-const VIEWS = { aggregate: aggregateView, station: stationView, training: trainingView };
+const VIEWS = { aggregate: aggregateView, station: stationView, training: trainingView, learn: learnView };
 
 const state = {
   frame: null,
@@ -219,6 +220,7 @@ function remountViews() {
     aggregate: aggregateView.mount(document.getElementById('view-aggregate'), ctx),
     station: stationView.mount(document.getElementById('view-station'), ctx),
     training: trainingView.mount(document.getElementById('view-training'), ctx),
+    learn: learnView.mount(document.getElementById('view-learn'), ctx),
   };
   const selected = document.querySelector('.views button[aria-selected="true"]')?.dataset.view ?? 'aggregate';
   showView(selected);

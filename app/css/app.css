@@ -585,3 +585,82 @@ html[data-mode='expert'] .howto { display: none; }
 }
 
 html[data-mode='expert'] .lane-label { display: none; }
+
+/* ---- "How this works" -------------------------------------------------- */
+/* A reading column, not a grid of panels: this view is prose in sequence and
+ * wants the measure of a page, while every other view wants density. */
+
+.learn {
+  max-width: 1080px;
+  margin: 0 auto;
+  padding: var(--s5) 0 var(--s6);
+}
+
+.learn-step {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 0.85fr);
+  gap: var(--s5);
+  align-items: start;
+  padding: var(--s5) 0;
+  border-top: 1px solid var(--rule);
+}
+
+.learn-step:first-child { border-top: 0; }
+
+.learn-num {
+  display: block;
+  font-family: var(--font-display);
+  font-size: 12px;
+  letter-spacing: 0.14em;
+  color: var(--text-faint);
+  margin-bottom: var(--s2);
+}
+
+.learn-text h3 {
+  font-size: 21px;
+  font-stretch: 90%;
+  color: var(--text);
+  margin-bottom: var(--s2);
+  max-width: 22ch;
+}
+
+.learn-text p {
+  margin: 0;
+  color: var(--text-dim);
+  font-size: 14.5px;
+  line-height: 1.62;
+  max-width: 62ch;
+}
+
+.learn-text strong { color: var(--text); font-weight: 600; }
+
+.learn-figure {
+  margin: 0;
+  position: sticky;
+  top: var(--s4);
+}
+
+.learn-figure canvas {
+  width: 100%;
+  height: 210px;
+  display: block;
+  background: var(--raised);
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+}
+
+.learn-figure figcaption {
+  margin-top: var(--s2);
+  color: var(--text-faint);
+  font-size: 11.5px;
+  line-height: 1.45;
+}
+
+.learn-closer { grid-template-columns: minmax(0, 1fr); }
+.learn-closer .learn-text p { max-width: 76ch; }
+
+@media (max-width: 860px) {
+  .learn-step { grid-template-columns: minmax(0, 1fr); gap: var(--s3); }
+  .learn-figure { position: static; }
+  .learn-figure canvas { height: 180px; }
+}

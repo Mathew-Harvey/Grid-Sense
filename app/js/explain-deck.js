@@ -12,7 +12,8 @@ export const DECK = {
   "tabs": {
     "aggregate": "Whole market",
     "station": "One station",
-    "training": "Watch it learn"
+    "training": "Watch it learn",
+    "learn": "How this works"
   },
   "panels": {
     "skill": {
